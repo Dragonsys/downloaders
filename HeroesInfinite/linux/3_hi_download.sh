@@ -20,10 +20,9 @@ NC='\033[0m'
 # SETTINGS
 # ==============================
 LIST_FILE="hi_downloads.tsv"                   # exported list (next to this script, or a full path)
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. in ~/.bashrc: export PRINTS_DIR=/mnt/nas/3DPrints) or change the default here.
-PRINTS_DIR="${PRINTS_DIR:-$HOME/3DPrints}"
-HI_DIR="$PRINTS_DIR/HeroesInfinite"            # where the files are stored
+# Where the files are stored. Empty = the folder this script is in.
+# To use another folder, put its full path here, e.g. "/mnt/nas/HeroesInfinite".
+HI_DIR=""
 
 # Folder layout:
 #   "collection_post" -> HI_DIR/<collection>/<post>/<file>   (recommended)
@@ -38,6 +37,13 @@ COOKIE_FILE="cookie.txt"
 USER_AGENT=''
 USER_AGENT_FILE="user_agent.txt"
 
+# Every finished file is recorded in HI_DIR/.hi_downloaded.tsv (keep that file!).
+SKIP_DOWNLOADED=1     # 1 = skip files recorded as downloaded, even if you've since extracted
+                      #     and deleted them; 0 = download them again if they're no longer there
+MARK_ALL_DOWNLOADED=0 # 1 = download nothing; record every file in the list as downloaded.
+                      #     Use once if you already have (or deleted) everything in your current
+                      #     list, so that from then on only new collections are downloaded.
+
 DOWNLOAD=1            # 1 = download missing files, 0 = check only (uses the record of past downloads)
 DELAY_SECONDS=5       # pause between files
 MAX_DOWNLOADS=0       # stop after this many downloads this run (0 = no limit)
@@ -50,6 +56,7 @@ BASE_URL="https://www.heroesinfinite.com"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$LIST_FILE" != /* && ! -f "$LIST_FILE" && -f "$script_dir/$LIST_FILE" ]] && LIST_FILE="$script_dir/$LIST_FILE"
+[[ -z "$HI_DIR" ]] && HI_DIR="$script_dir"
 HI_DIR="${HI_DIR%/}"
 LEDGER="$HI_DIR/.hi_downloaded.tsv"     # record of which download id became which file
 MISSING_OUT="hi_missing.tsv"
@@ -58,8 +65,15 @@ FAILED_OUT="hi_failed.txt"
 echo -e "${BLUE}Heroes Infinite downloader${NC}"
 printf "List file:   ${YELLOW}%s${NC}\n" "$LIST_FILE"
 printf "Destination: ${YELLOW}%s${NC} (layout: %s)\n" "$HI_DIR" "$ORGANIZE"
-[[ $DOWNLOAD -eq 1 ]] && printf "Mode:        ${YELLOW}download missing files${NC} (%ss between files)\n" "$DELAY_SECONDS" \
-                      || printf "Mode:        ${YELLOW}check only${NC}\n"
+if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
+    printf "Mode:        ${YELLOW}record everything in the list as downloaded (nothing is downloaded)${NC}\n"
+    DOWNLOAD=0   # no cookie needed
+elif [[ $DOWNLOAD -eq 1 ]]; then
+    printf "Mode:        ${YELLOW}download missing files${NC} (%ss between files)\n" "$DELAY_SECONDS"
+else
+    printf "Mode:        ${YELLOW}check only${NC}\n"
+fi
+(( SKIP_DOWNLOADED )) && printf "Recorded files are skipped even if they're no longer in the folder.\n"
 echo ""
 
 [[ -f "$LIST_FILE" ]] || { echo -e "${RED}List file not found: $LIST_FILE${NC}"; exit 1; }
@@ -192,15 +206,17 @@ fetch_file() {
 # ---------- read the ledger (download id -> file path, relative to HI_DIR) ----------
 declare -A ledger=() path_owner=()
 if [[ -f "$LEDGER" ]]; then
-    while IFS=$'\t' read -r lid lpath; do
+    while IFS=$'\t' read -r lid lpath _; do
         [[ -n "$lid" && -n "$lpath" ]] || continue
         ledger[$lid]="$lpath"; path_owner[$lpath]="$lid"
-    done < "$LEDGER"
+    done < <(tr -d '\r' < "$LEDGER")
 fi
-record() {   # record ID RELPATH
+record() {   # record ID RELPATH   (third column: date, for your information)
+    [[ "${ledger[$1]}" == "$2" ]] && return
     ledger[$1]="$2"; path_owner[$2]="$1"
-    printf '%s\t%s\n' "$1" "$2" >> "$LEDGER"
+    printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"
 }
+NOT_DOWNLOADED_MARK="(recorded with MARK_ALL_DOWNLOADED)"
 
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")
@@ -215,7 +231,7 @@ done
 printf '%s\n' "${lines[0]}" > "$MISSING_OUT"
 : > "$FAILED_OUT"
 
-total=0; present=0; downloaded=0; failed=0; unchecked=0; attempts=0; first_request=1; stopped=""
+total=0; present=0; downloaded=0; failed=0; unchecked=0; marked=0; attempts=0; first_request=1; stopped=""
 declare -A seen=()
 
 for (( n = 1; n < ${#lines[@]}; n++ )); do
@@ -236,9 +252,13 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     if [[ "$ORGANIZE" == "collection" ]]; then reldir="$cdir"; else reldir="$cdir/$pdir"; fi
     what="$collection - ${post:+$post - }${label:-$id}"
 
-    # Already downloaded before?
-    if [[ -n "${ledger[$id]}" && -s "$HI_DIR/${ledger[$id]}" ]]; then
+    # Already downloaded before? (the file may have been extracted and deleted since)
+    if [[ -n "${ledger[$id]}" ]] && { (( SKIP_DOWNLOADED )) || [[ -s "$HI_DIR/${ledger[$id]}" ]]; }; then
         ((present++)); printf "  ${GREEN}✓${NC} %s\n" "$what"; continue
+    fi
+    if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
+        record "$id" "$NOT_DOWNLOADED_MARK"
+        ((marked++)); printf "  ${GREEN}✓ recorded${NC} %s\n" "$what"; continue
     fi
 
     if [[ $DOWNLOAD -ne 1 || -n "$stopped" ]]; then
@@ -320,11 +340,12 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     fi
 done
 
-missing=$((total - present - downloaded))
+missing=$((total - present - downloaded - marked))
 echo ""
 echo -e "${YELLOW}================================================${NC}"
 echo -e " Downloads in list:      ${BLUE}${total}${NC}"
 echo -e " Already downloaded:     ${GREEN}${present}${NC}"
+(( marked )) && echo -e " Recorded as downloaded: ${GREEN}${marked}${NC} (MARK_ALL_DOWNLOADED - nothing was downloaded)"
 echo -e " Downloaded this run:    ${GREEN}${downloaded}${NC}"
 echo -e " Failed:                 ${RED}${failed}${NC}"
 echo -e " Still missing:          ${RED}${missing}${NC}"
@@ -334,3 +355,4 @@ echo -e "${YELLOW}================================================${NC}"
 (( missing > 0 )) && echo -e "Still-missing downloads saved to: ${YELLOW}${MISSING_OUT}${NC}"
 (( failed > 0 )) && echo -e "Failure reasons saved to:         ${YELLOW}${FAILED_OUT}${NC}"
 (( missing == 0 && failed == 0 )) && echo -e "${GREEN}Everything in the list is downloaded.${NC}"
+if (( MARK_ALL_DOWNLOADED )); then echo -e "${YELLOW}Set MARK_ALL_DOWNLOADED back to 0 before the next run.${NC}"; fi

@@ -15,10 +15,9 @@
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. setx PRINTS_DIR "D:\3DPrints") or change the default here.
-$PRINTS_DIR = if ($env:PRINTS_DIR) { $env:PRINTS_DIR } else { Join-Path $HOME '3DPrints' }
-$BASE_PATH = Join-Path $PRINTS_DIR '.mmf_downloads\models'   # folder to search for archives
+# Folder to search for archives. Empty = the "models" folder next to this script,
+# or put a full path here, e.g. 'D:\MyMiniFactory\models' or 'D:\LootStudios'.
+$BASE_PATH = ''
 
 # $false = extract into "<archive>_extracted" folders (recommended)
 # $true  = extract straight into the model folder; files with the same name
@@ -28,6 +27,8 @@ $EXTRACT_IN_PLACE = $false
 # Path to 7-Zip (optional). Needed for .7z and .rar files.
 $SEVEN_ZIP = "C:\Program Files\7-Zip\7z.exe"
 # ============================================================================
+
+if (-not $BASE_PATH) { $BASE_PATH = Join-Path $PSScriptRoot 'models' }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 

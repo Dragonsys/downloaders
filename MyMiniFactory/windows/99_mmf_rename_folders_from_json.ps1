@@ -10,11 +10,10 @@
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. setx PRINTS_DIR "D:\3DPrints") or change the default here.
-$PRINTS_DIR = if ($env:PRINTS_DIR) { $env:PRINTS_DIR } else { Join-Path $HOME '3DPrints' }
-$JSON_PATH    = Join-Path $PRINTS_DIR '.mmf_downloads\downloads'
-$FOLDERS_PATH = Join-Path $PRINTS_DIR '.mmf_downloads\models'
+# Folders. Empty = the "downloads" / "models" folder next to this script,
+# or put a full path here, e.g. 'D:\MyMiniFactory\models'.
+$JSON_PATH    = ''    # JSON metadata from step 2
+$FOLDERS_PATH = ''    # model_<id> folders
 
 # "ID_NAME"   -> 851789_Yhal_The_Skygazer  (recommended, always unique)
 # "NAME_ONLY" -> Yhal_The_Skygazer
@@ -27,6 +26,9 @@ $MAX_NAME_LENGTH = 80
 # $false = actually rename folders
 $DRY_RUN = $true
 # ============================================================================
+
+if (-not $JSON_PATH)    { $JSON_PATH    = Join-Path $PSScriptRoot 'downloads' }
+if (-not $FOLDERS_PATH) { $FOLDERS_PATH = Join-Path $PSScriptRoot 'models' }
 
 $RESERVED = '^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$'
 

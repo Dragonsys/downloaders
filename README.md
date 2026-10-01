@@ -23,51 +23,47 @@ Every script starts with its **step number** and a site prefix (`mmf_`, `loot_`,
 - `1_`, `2_`, `3_` ... are the steps, in order. A missing number (e.g. MyMiniFactory step 4) is a manual step, explained in that site's guide.
 - `99_` marks **optional** scripts (extracting, renaming, resetting).
 
-## Configuration: one setting, `PRINTS_DIR`
+## Where the files go: the script's own folder
 
-All scripts store everything under one root folder, **`PRINTS_DIR`**:
-
-| | Default if not set |
-|---|---|
-| Linux | `~/3DPrints` |
-| Windows | `%USERPROFILE%\3DPrints` |
-
-Set it once as an environment variable instead of editing the scripts:
-
-```bash
-# Linux - add to ~/.bashrc, then open a new terminal
-export PRINTS_DIR=/mnt/nas/3DPrints
-```
-
-```powershell
-# Windows - run once, then open a new PowerShell window
-setx PRINTS_DIR "D:\3DPrints"
-```
-
-If Linux and Windows both use the scripts, point `PRINTS_DIR` at the **same folder** on both (for example a NAS share mounted on Linux and mapped as a drive on Windows), so files saved on one side are seen on the other.
-
-Layout under `PRINTS_DIR`:
+Make one folder per site and **copy that site's scripts into it**. The scripts store everything in the folder they're in, so there's nothing to configure. For example, on a NAS:
 
 ```
-PRINTS_DIR/
-├── .mmf_downloads/        MyMiniFactory working folder (scripts, cookie, lists, reports)
+/mnt/nas/3DPrints/
+├── MyMiniFactory/         all MyMiniFactory scripts (Linux and Windows), cookie, lists, reports
 │   ├── downloads/         JSON metadata per model
 │   └── models/            model_<id>/ folders with the files
-├── .loot_downloads/       Loot Studios working folder
-├── LootStudios/           Loot Studios bundles
-├── .hi_downloads/         Heroes Infinite working folder
-└── HeroesInfinite/        Heroes Infinite collections
+├── LootStudios/           3_loot_download_all_bundles.sh, its lists, and the bundle folders
+└── HeroesInfinite/        3_hi_download.sh, its lists, and the collection folders
 ```
 
-Other optional settings are at the top of each script (folder layout, filters, delays). The MyMiniFactory Windows scripts also read `MMF_DOWNLOAD_PATH` - where your browser's download manager saves MyMiniFactory files (default `%USERPROFILE%\Downloads\www.myminifactory.com\download`).
+The folder names and location are up to you. The examples in the guides use `/mnt/nas/3DPrints/<site>` - replace that with your own folder.
+
+If Linux and Windows both use the scripts (MyMiniFactory), use a folder both can see, for example a NAS share mounted on Linux and mapped as a drive on Windows, and run the scripts from there.
+
+**Want the files somewhere else?** Each script has its folders as plain settings at the top (`LOOT_DIR`, `HI_DIR`, `JSON_DIR`, `DOWNLOAD_DIR`, `$MODELS_PATH`, ...). They're empty by default, which means "the script's own folder"; put a full path in to use another folder. If you change a MyMiniFactory folder, change it in every MyMiniFactory script, since they work on the same folders.
+
+Other optional settings are at the top of each script too (folder layout, filters, delays). The MyMiniFactory Windows scripts also have `$DOWN_PATH` - where your browser's download manager saves MyMiniFactory files (empty = `%USERPROFILE%\Downloads\www.myminifactory.com\download`).
 
 ## One-time browser setup
 
 The first time you paste code into Chrome's Console, it refuses and shows a warning. Type `allow pasting` and press Enter, then paste again. Only paste code you've read and trust.
 
+### Hide the Console "noise"
+
+While a script runs, the Console also fills with messages that have nothing to do with it, often in red: blocked trackers (`ERR_BLOCKED_BY_CLIENT`), CORS errors, and warnings from the sites' own scripts (for Loot Studios, also from every bundle page the collector opens in the background). They're harmless, but they bury the script's own lines. No script can switch them off, but Chrome and Edge can hide them:
+
+1. In the **Console** tab, click the **gear icon** (⚙, *Console settings*) at the top right of the Console panel.
+2. Tick **Hide network** - hides the red network error lines.
+3. Tick **Selected context only** - shows only messages from the page you ran the script on, so everything from background frames disappears. The dropdown at the top left of the Console must show **top** (the default).
+4. Click the gear icon again to close the settings. To clear what's already there, click the 🚫 icon (*Clear console*) or press **Ctrl+L**.
+
+You only need to do this once; Chrome remembers it. To see everything again, untick both.
+
+The collectors also show their progress in a small panel at the bottom right of the page, so you can close DevTools entirely once they've started.
+
 ## Keep your cookie private
 
-The MyMiniFactory and Heroes Infinite scripts use your login cookie for that site, stored in `cookie.txt` in each site's working folder. Anyone who has it can use your account.
+The MyMiniFactory and Heroes Infinite scripts use your login cookie for that site, stored in `cookie.txt` in that site's folder, next to the scripts. Anyone who has it can use your account.
 
 - Never put it in a script, a commit, a chat, or a forum post. Keep it only in `cookie.txt` (the included `.gitignore` excludes it).
 - `chmod 600 cookie.txt` so only your user can read it.

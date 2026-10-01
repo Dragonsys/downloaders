@@ -30,14 +30,14 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
    sudo apt install curl jq
    ```
 
-2. Put the two Linux scripts in the working folder:
+2. Make your **MyMiniFactory folder** and put the two Linux scripts in it. The scripts keep everything in the folder they're in (`downloads/` for the JSON, `models/` for the files). These examples use `/mnt/nas/3DPrints/MyMiniFactory`; use your own folder:
 
    ```bash
-   mkdir -p "$PRINTS_DIR/.mmf_downloads/models"
-   cp 2_mmf_download_metadata.sh 3_mmf_check_and_download.sh "$PRINTS_DIR/.mmf_downloads/"
+   mkdir -p /mnt/nas/3DPrints/MyMiniFactory/models
+   cp 2_mmf_download_metadata.sh 3_mmf_check_and_download.sh /mnt/nas/3DPrints/MyMiniFactory/
    ```
 
-   (If your Windows PC sees the same folder, it's `%PRINTS_DIR%\.mmf_downloads` there.)
+   Pick a folder your Windows PC can see too (e.g. a NAS share mapped as `Z:`, so this is `Z:\3DPrints\MyMiniFactory`), since the Windows scripts work on the same files.
 
 3. Create **`user_agent.txt`** in that folder: in the browser you use for MyMiniFactory, open the Console (F12), run `navigator.userAgent`, and paste the result into the file (quotes are fine).
 
@@ -51,19 +51,21 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
    Then protect it:
 
    ```bash
-   chmod 600 "$PRINTS_DIR/.mmf_downloads/cookie.txt"
+   chmod 600 /mnt/nas/3DPrints/MyMiniFactory/cookie.txt
    ```
 
    The cookie expires eventually; when step 2 starts failing, repeat this. If the browser updates to a new version, refresh `user_agent.txt` too.
 
 ### On Windows
 
-1. Copy the `windows` folder somewhere, e.g. `C:\mmf-scripts`.
+1. Copy the `.ps1` files from the `windows` folder into the **same MyMiniFactory folder** as the Linux scripts (e.g. `Z:\3DPrints\MyMiniFactory`). They then find `downloads\` and `models\` by themselves.
 2. Install **PowerShell 7** (recommended; `winget install Microsoft.PowerShell`) and optionally **7-Zip** (needed for `.rar`/`.7z`, faster for everything).
-3. Check the paths at the top of each `.ps1` file. The defaults are:
-   - Downloads arrive in: `%USERPROFILE%\Downloads\www.myminifactory.com\download` (override with the `MMF_DOWNLOAD_PATH` environment variable)
-   - JSON files: `%PRINTS_DIR%\.mmf_downloads\downloads`
-   - Model folders: `%PRINTS_DIR%\.mmf_downloads\models`
+3. The folder settings at the top of each `.ps1` file are empty by default, which means:
+   - `$DOWN_PATH` - where the download manager saves files: `%USERPROFILE%\Downloads\www.myminifactory.com\download`
+   - `$JSON_PATH` - the `downloads` folder next to the script
+   - `$MODELS_PATH` / `$FOLDERS_PATH` / `$BASE_PATH` - the `models` folder next to the script
+
+   Only fill them in (with a full path, e.g. `$DOWN_PATH = 'D:\Downloads\mmf'`) if your folders are somewhere else, for example if you keep the scripts in a different folder. Use the same paths in every script.
 4. How to run a script: open PowerShell in that folder and run, for example:
 
    ```powershell
@@ -74,7 +76,10 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 
 ### In your browser
 
-Once: open the Console (F12), type `allow pasting`, press Enter.
+Do this once (Chrome remembers it):
+
+1. Open the Console (F12), type `allow pasting`, press Enter.
+2. Hide the Console "noise" - red errors and warnings from the site's own scripts that have nothing to do with ours: click the **gear icon** (⚙) at the top right of the Console panel, tick **Hide network** and **Selected context only**, and click the gear again. The dropdown at the top left of the Console must show **top**. Details: [Hide the Console "noise"](../README.md#hide-the-console-noise).
 
 ---
 
@@ -82,16 +87,18 @@ Once: open the Console (F12), type `allow pasting`, press Enter.
 
 ### Step 1 - Collect your model IDs (browser)
 
-1. Go to **myminifactory.com/library**. To get everything, clear the **"not downloaded"** filter.
+1. Go to **myminifactory.com/library** and turn on the **"not downloaded"** filter, so the library only shows items you haven't downloaded yet. That keeps the list short: fewer IDs here means fewer metadata requests in step 2 and fewer links in step 4.
+   - Items you downloaded from MyMiniFactory earlier (e.g. by hand, to another PC) count as downloaded and won't show. For your **first complete backup**, clear the filter once to get everything; after that, keep it on.
 2. **Scroll to the bottom** so every item is loaded.
 3. Press **F12** → **Console**, paste `browser/1_mmf_collect_model_ids.js`, press **Enter**.
    It says `N model IDs copied to the clipboard`. (If the number is low, scroll further and run it again - it adds up.)
-4. Open **Notepad**, paste, and save as **`model_ids.txt`** in the working folder (`%PRINTS_DIR%\.mmf_downloads\`, or copy it there afterwards) (Save as type: **All files**).
+   The IDs are kept until you reload the page: if you change the filter, press **F5** before running the script again, or the IDs from before the change are included too.
+4. Open **Notepad**, paste, and save as **`model_ids.txt`** in your MyMiniFactory folder (e.g. `Z:\3DPrints\MyMiniFactory`, or copy it there afterwards) (Save as type: **All files**).
 
 ### Step 2 - Download the metadata (Linux)
 
 ```bash
-cd "$PRINTS_DIR/.mmf_downloads"
+cd /mnt/nas/3DPrints/MyMiniFactory
 bash 2_mmf_download_metadata.sh
 ```
 
@@ -107,7 +114,7 @@ This saves one `downloads/model_<id>.json` per model (3 seconds apart). Failed I
 ### Step 3 - Find what's missing (Linux)
 
 ```bash
-cd "$PRINTS_DIR/.mmf_downloads"
+cd /mnt/nas/3DPrints/MyMiniFactory
 bash 3_mmf_check_and_download.sh
 ```
 
@@ -121,9 +128,9 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 
 ### Step 4 - Download the missing files (browser, Windows)
 
-1. Open `missing_downloads.txt` from the working folder on your PC (copy it over if Windows can't see that folder).
+1. Open `missing_downloads.txt` from your MyMiniFactory folder on your PC (copy it over if Windows can't see that folder).
 2. Load the links into your browser's **download manager** extension while logged in to MyMiniFactory.
-3. Make it save into **`%USERPROFILE%\Downloads\www.myminifactory.com\download`** (the folder `5_mmf_correct_filenames.ps1` and `6_mmf_move_downloads.ps1` read; set `MMF_DOWNLOAD_PATH` if yours saves elsewhere), keeping the folder structure it creates from the links. 
+3. Make it save into **`%USERPROFILE%\Downloads\www.myminifactory.com\download`** (the folder `5_mmf_correct_filenames.ps1` and `6_mmf_move_downloads.ps1` read; set `$DOWN_PATH` in both scripts if yours saves elsewhere), keeping the folder structure it creates from the links. 
 4. Download **1-2 files at a time** to stay under the rate limit.
 
 Items that show a **padlock** in your library may be unavailable to your account; those downloads fail in the browser too.
@@ -142,7 +149,7 @@ It starts as a **dry run** and only shows what it would rename. If that looks ri
 pwsh -ExecutionPolicy Bypass -File .\6_mmf_move_downloads.ps1
 ```
 
-Again a **dry run** first; then set `$DRY_RUN = $false` and rerun. Files go to `%PRINTS_DIR%\.mmf_downloads\models\model_<id>\<filename>`, the layout step 3 checks. Empty download folders are cleaned up. Anything needing attention is listed in `move_problems.txt` (files already in the models folder, not renamed yet, unknown model).
+Again a **dry run** first; then set `$DRY_RUN = $false` and rerun. Files go to `models\model_<id>\<filename>` in your MyMiniFactory folder, the layout step 3 checks. Empty download folders are cleaned up. Anything needing attention is listed in `move_problems.txt` (files already in the models folder, not renamed yet, unknown model).
 
 ### Step 7 - Check, and repeat (Linux)
 
@@ -172,6 +179,6 @@ Dry run first, then `$DRY_RUN = $false`. Renames `model_851789` to `851789_Yhal_
 
 ## Adding new purchases later
 
-Repeat steps 1-7. Files already downloaded are skipped, so only the new models are fetched.
+Repeat steps 1-7, with the **"not downloaded"** filter on in step 1 so only the new models are collected. Files already downloaded are skipped, so only the new models are fetched.
 
 If you have already renamed your folders (step 9), step 3 can no longer see the renamed ones and will list them as missing too. In that case, only download the new models in step 4, then run step 9 again to rename their new `model_<id>` folders.

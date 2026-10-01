@@ -19,11 +19,10 @@ NC='\033[0m'
 # ==============================
 GENERATE_HTML=1       # set to 1 to enable HTML report
 GENERATE_ALLFILES=1   # set to 1 to enable All Files Report
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. in ~/.bashrc: export PRINTS_DIR=/mnt/nas/3DPrints) or change the default here.
-PRINTS_DIR="${PRINTS_DIR:-$HOME/3DPrints}"
-JSON_DIR="$PRINTS_DIR/.mmf_downloads/downloads/"     # JSON metadata from 2_mmf_download_metadata.sh
-DOWNLOAD_DIR="$PRINTS_DIR/.mmf_downloads/models/"    # model_<id> folders with the files
+# Folders. Empty = the "downloads" / "models" folder next to this script.
+# To use other folders, put their full paths here, e.g. "/mnt/nas/MyMiniFactory/models".
+JSON_DIR=""           # JSON metadata from 2_mmf_download_metadata.sh
+DOWNLOAD_DIR=""       # model_<id> folders with the files
 OUTPUT_FILE="missing_downloads.txt"          # URLs still missing at the end
 FAILED_FILE="failed_downloads.txt"           # download failures with reasons
 ALL_FILES_OUTPUT="all_filenames_by_model.txt"
@@ -56,6 +55,10 @@ AUTH_FAIL_LIMIT=3     # stop downloading after this many login/bot-check failure
 BASE_URL="https://www.myminifactory.com"
 # ==============================
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -z "$JSON_DIR" ]] && JSON_DIR="$script_dir/downloads"
+[[ -z "$DOWNLOAD_DIR" ]] && DOWNLOAD_DIR="$script_dir/models"
+
 # Remove trailing slashes so paths don't contain "//"
 JSON_DIR="${JSON_DIR%/}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR%/}"
@@ -80,7 +83,6 @@ command -v jq &> /dev/null || { echo -e "${RED}Error: jq not installed.${NC}"; e
 # Download setup
 if [[ $DOWNLOAD_MISSING -eq 1 ]]; then
     command -v curl &> /dev/null || { echo -e "${RED}Error: curl not installed.${NC}"; exit 1; }
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     [[ -z "$COOKIE" && -n "$MMF_COOKIE" ]] && COOKIE="$MMF_COOKIE"
     [[ -z "$COOKIE" && -f "$script_dir/$COOKIE_FILE" ]] && COOKIE="$(tr -d '\r\n' < "$script_dir/$COOKIE_FILE")"
     [[ -z "$COOKIE" ]] && { echo -e "${RED}Error: no cookie set (COOKIE, $COOKIE_FILE, or MMF_COOKIE).${NC}"; exit 1; }

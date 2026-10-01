@@ -21,10 +21,9 @@ NC='\033[0m'
 # SETTINGS
 # ==============================
 LIST_FILE="loot_all_bundles.tsv"            # exported list (next to this script, or a full path)
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. in ~/.bashrc: export PRINTS_DIR=/mnt/nas/3DPrints) or change the default here.
-PRINTS_DIR="${PRINTS_DIR:-$HOME/3DPrints}"
-LOOT_DIR="$PRINTS_DIR/LootStudios"          # where the bundles are stored
+# Where the bundles are stored. Empty = the folder this script is in.
+# To use another folder, put its full path here, e.g. "/mnt/nas/LootStudios".
+LOOT_DIR=""
 
 # Folder layout:
 #   "folder" -> LOOT_DIR/FaewoodHaven/All_FaewoodHaven_Bust.zip   (name from the download link)
@@ -33,6 +32,13 @@ ORGANIZE="folder"
 
 MATERIALS=""          # only these materials, e.g. "resin" or "resin fdm"; empty = all
 SCALES=""             # only these scales, e.g. "32mm bust"; empty = all
+
+# Every finished file is recorded in LOOT_DIR/.loot_downloaded.tsv (keep that file!).
+SKIP_DOWNLOADED=1     # 1 = skip files recorded as downloaded, even if you've since extracted
+                      #     and deleted them; 0 = download them again if they're no longer there
+MARK_ALL_DOWNLOADED=0 # 1 = download nothing; record every file in the list as downloaded.
+                      #     Use once if you already have (or deleted) everything in your current
+                      #     list, so that from then on only new bundles are downloaded.
 
 DOWNLOAD=1            # 1 = download missing files, 0 = check only
 DELAY_SECONDS=5       # pause between downloads
@@ -47,17 +53,26 @@ VERIFY=1              # 1 = test each archive after downloading (needs unzip; un
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$LIST_FILE" != /* && ! -f "$LIST_FILE" && -f "$script_dir/$LIST_FILE" ]] && LIST_FILE="$script_dir/$LIST_FILE"
+[[ -z "$LOOT_DIR" ]] && LOOT_DIR="$script_dir"
 LOOT_DIR="${LOOT_DIR%/}"
 
+LEDGER="$LOOT_DIR/.loot_downloaded.tsv"   # record of finished files (key, path, date)
 MISSING_OUT="loot_missing.tsv"     # rows still missing after this run (same format as the input)
 FAILED_OUT="loot_failed.txt"       # failures with reasons
 EXPIRED_OUT="loot_expired.txt"     # bundles whose links need refreshing
+DONE_JS="loot_done_bundles.js"     # paste into the Console so the collector skips finished bundles
 
 echo -e "${BLUE}Loot Studios All Bundle downloader${NC}"
 printf "List file:   ${YELLOW}%s${NC}\n" "$LIST_FILE"
 printf "Destination: ${YELLOW}%s${NC} (organized by %s)\n" "$LOOT_DIR" "$ORGANIZE"
-[[ $DOWNLOAD -eq 1 ]] && printf "Mode:        ${YELLOW}download missing files${NC} (%ss between downloads)\n" "$DELAY_SECONDS" \
-                      || printf "Mode:        ${YELLOW}check only${NC}\n"
+if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
+    printf "Mode:        ${YELLOW}record everything in the list as downloaded (nothing is downloaded)${NC}\n"
+elif [[ $DOWNLOAD -eq 1 ]]; then
+    printf "Mode:        ${YELLOW}download missing files${NC} (%ss between downloads)\n" "$DELAY_SECONDS"
+else
+    printf "Mode:        ${YELLOW}check only${NC}\n"
+fi
+(( SKIP_DOWNLOADED )) && printf "Recorded files are skipped even if they're no longer in the folder.\n"
 echo ""
 
 [[ -f "$LIST_FILE" ]] || { echo -e "${RED}List file not found: $LIST_FILE${NC}"; exit 1; }
@@ -151,15 +166,6 @@ download_file() {
     done
 }
 
-# ---------- index of files already downloaded (anywhere under LOOT_DIR) ----------
-# Lets the script recognise files even if they sit in a different folder than it
-# would choose now (e.g. after changing ORGANIZE), instead of downloading them again.
-declare -A have_file=()
-while IFS= read -r -d '' p; do
-    b="${p##*/}"
-    [[ -z "${have_file[$b]}" ]] && have_file[$b]="$p"
-done < <(find "$LOOT_DIR" -type f ! -name '*.part' -size +0 -print0 2>/dev/null)
-
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")
 (( ${#lines[@]} > 1 )) || { echo -e "${RED}The list is empty.${NC}"; exit 1; }
@@ -190,9 +196,25 @@ parse_row() {
     if [[ "$ORGANIZE" == "bundle" || -z "$folder" ]]; then dir="$(safe_name "$bundle")"; else dir="$(safe_name "$folder")"; fi
     [[ -z "$dir" ]] && dir="Unknown bundle"
     dest="$LOOT_DIR/$dir/$(safe_name "$file")"
+    page="${f[${col[page]:-99}]}"
+    # Stable id for the ledger (the link itself changes every time it is refreshed)
+    key="${page:-$bundle}|$scale|$material|$file"
     link_time=0
     [[ "$url" =~ [?\&]v=([0-9]{9,})- ]] && link_time="${BASH_REMATCH[1]}"
     ROW_OK=1
+}
+
+# ---------- ledger of finished files: key <TAB> path relative to LOOT_DIR <TAB> date ----------
+declare -A recorded=()
+if [[ -f "$LEDGER" ]]; then
+    while IFS=$'\t' read -r lkey lpath _; do
+        [[ -n "$lkey" ]] && recorded[$lkey]="${lpath:--}"
+    done < <(tr -d '\r' < "$LEDGER")
+fi
+record() {   # record KEY PATH
+    [[ "${recorded[$1]}" == "$2" ]] && return
+    recorded[$1]="$2"
+    printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"
 }
 
 # If the list holds several links for the same file (e.g. an older export), use the newest one
@@ -205,10 +227,11 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 done
 
 now=$(date +%s)
-total=0; present=0; downloaded=0; failed=0; expired=0; filtered=0; unchecked=0
+total=0; present=0; downloaded=0; failed=0; expired=0; filtered=0; unchecked=0; marked=0
 refused_streak=0; attempts=0; first_download=1; stopped=""
-declare -A expired_bundles=()
+declare -A expired_bundles=() page_files=() page_done=()
 keep_missing() { printf '%s\n' "$line" >> "$MISSING_OUT"; }   # uses the current $line
+is_done() { [[ -n "$page" ]] && page_done[$page]=$(( ${page_done[$page]:-0} + 1 )); }
 
 for (( n = 1; n < ${#lines[@]}; n++ )); do
     line="${lines[$n]}"
@@ -216,17 +239,42 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     (( ${best_row[$dest]} == n )) || continue      # an older link for the same file
     if ! in_list "$material" "$MATERIALS" || ! in_list "$scale" "$SCALES"; then ((filtered++)); continue; fi
     ((total++))
+    [[ -n "$page" ]] && page_files[$page]=$(( ${page_files[$page]:-0} + 1 ))
 
     label="$bundle - ${scale:+$scale }${material:+$material }($file)"
 
-    if [[ -s "$dest" ]]; then
-        ((present++))
+    # Recorded as downloaded on an earlier run (the file may have been extracted and deleted since)
+    if [[ -n "${recorded[$key]}" ]] && { (( SKIP_DOWNLOADED )) || [[ -s "$LOOT_DIR/${recorded[$key]}" ]]; }; then
+        ((present++)); is_done
         printf "  ${GREEN}✓${NC} %s\n" "$label"
         continue
     fi
-    elsewhere="${have_file[$(safe_name "$file")]}"
+    if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
+        record "$key" "${dest#"$LOOT_DIR/"}"
+        ((marked++)); is_done
+        printf "  ${GREEN}✓ recorded${NC} %s\n" "$label"
+        continue
+    fi
+
+    if [[ -s "$dest" ]]; then
+        record "$key" "${dest#"$LOOT_DIR/"}"
+        ((present++)); is_done
+        printf "  ${GREEN}✓${NC} %s\n" "$label"
+        continue
+    fi
+    # Also accept the file in this bundle's other possible folder (the other
+    # ORGANIZE setting), so changing ORGANIZE doesn't cause re-downloads.
+    # Never look in other bundles' folders: many bundles use the same file
+    # names (e.g. All_75mm.zip).
+    elsewhere=""
+    for alt in "$(safe_name "$folder")" "$(safe_name "$bundle")"; do
+        [[ -n "$alt" ]] || continue
+        cand="$LOOT_DIR/$alt/$(safe_name "$file")"
+        if [[ "$cand" != "$dest" && -s "$cand" ]]; then elsewhere="$cand"; break; fi
+    done
     if [[ -n "$elsewhere" ]]; then
-        ((present++))
+        record "$key" "${elsewhere#"$LOOT_DIR/"}"
+        ((present++)); is_done
         printf "  ${GREEN}✓${NC} %s ${YELLOW}(already at %s)${NC}\n" "$label" "${elsewhere#"$LOOT_DIR/"}"
         continue
     fi
@@ -275,8 +323,8 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
             fi
             (( v == 2 )) && ((unchecked++))
         fi
-        ((downloaded++))
-        have_file["${dest##*/}"]="$dest"
+        record "$key" "${dest#"$LOOT_DIR/"}"
+        ((downloaded++)); is_done
         secs=$(( $(date +%s) - start ))
         printf "  ${GREEN}✓ DOWNLOADED${NC} %s (%s in %ss)\n" "$label" "$(du -h "$dest" | cut -f1)" "$secs"
         continue
@@ -298,12 +346,35 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 done
 
 for b in "${!expired_bundles[@]}"; do echo "$b"; done | sort > "$EXPIRED_OUT"
-missing=$((total - present - downloaded))
+missing=$((total - present - downloaded - marked))
+
+# Bundles whose files are all downloaded -> snippet for the collector, so it doesn't re-read them
+done_pages=()
+for p in "${!page_files[@]}"; do
+    (( ${page_done[$p]:-0} >= ${page_files[$p]} )) && done_pages+=("$p")
+done
+if (( ${#page_files[@]} > 0 )); then
+    {
+        printf '// Written by 3_loot_download_all_bundles.sh on %s.\n' "$(date '+%Y-%m-%d %H:%M')"
+        printf '// Paste into the Console on app.lootstudios.com before running 1_loot_collect_all_bundles.js:\n'
+        printf '// the collector then skips these bundles, because everything in them is downloaded.\n'
+        printf '// Hide unrelated Console "noise" (red errors/warnings from the site'"'"'s own scripts): click the\n'
+        printf '// gear icon at the top right of the Console, tick "Hide network" and "Selected context only".\n'
+        printf "localStorage.setItem('lootDonePages', JSON.stringify([\n"
+        for p in "${done_pages[@]}"; do
+            p="${p//\\/\\\\}"; p="${p//\"/\\\"}"
+            printf '  "%s",\n' "$p"
+        done | sort
+        printf ']));\n'
+        printf "'%s downloaded bundle(s) saved - the collector will skip them.'\n" "${#done_pages[@]}"
+    } > "$DONE_JS"
+fi
 
 echo ""
 echo -e "${YELLOW}================================================${NC}"
 echo -e " Files in list:          ${BLUE}${total}${NC}$( (( filtered )) && echo "  (+$filtered skipped by MATERIALS/SCALES)")"
 echo -e " Already downloaded:     ${GREEN}${present}${NC}"
+(( marked )) && echo -e " Recorded as downloaded: ${GREEN}${marked}${NC} (MARK_ALL_DOWNLOADED - nothing was downloaded)"
 echo -e " Downloaded this run:    ${GREEN}${downloaded}${NC}"
 echo -e " Expired links:          ${YELLOW}${expired}${NC}"
 echo -e " Failed:                 ${RED}${failed}${NC}"
@@ -320,3 +391,8 @@ if (( expired > 0 )); then
     echo "Refresh: run 1_loot_collect_all_bundles.js again (it re-reads expired bundles), export with 2_loot_export_list.js, and rerun this script."
 fi
 (( missing == 0 && failed == 0 )) && echo -e "${GREEN}Everything in the list is downloaded.${NC}"
+if [[ -s "$DONE_JS" ]] && (( ${#done_pages[@]} > 0 )); then
+    echo -e "${#done_pages[@]} bundle(s) are fully downloaded. To make the collector skip them next round, paste"
+    echo -e "${YELLOW}${DONE_JS}${NC} into the Console on app.lootstudios.com before running the collector."
+fi
+if (( MARK_ALL_DOWNLOADED )); then echo -e "${YELLOW}Set MARK_ALL_DOWNLOADED back to 0 before the next run.${NC}"; fi

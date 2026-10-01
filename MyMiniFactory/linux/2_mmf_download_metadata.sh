@@ -12,10 +12,9 @@ NC='\033[0m'
 # ==============================
 # CONFIG
 # ==============================
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. in ~/.bashrc: export PRINTS_DIR=/mnt/nas/3DPrints) or change the default here.
-PRINTS_DIR="${PRINTS_DIR:-$HOME/3DPrints}"
-JSON_OUTPUT_DIR="$PRINTS_DIR/.mmf_downloads/downloads"   # where the JSON metadata is saved
+# Where the JSON metadata is saved. Empty = the "downloads" folder next to this
+# script. To use another folder, put its full path here, e.g. "/mnt/nas/MyMiniFactory/downloads".
+JSON_OUTPUT_DIR=""
 
 # Cookie: leave empty to use cookie.txt next to this script (same file as
 # 3_mmf_check_and_download.sh), or set the MMF_COOKIE environment variable. Never share it.
@@ -31,8 +30,10 @@ USER_AGENT_FILE="user_agent.txt"
 DELAY_SECONDS=3
 # ==============================
 
-# Look for cookie and user agent: script setting, then environment variable, then file
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -z "$JSON_OUTPUT_DIR" ]] && JSON_OUTPUT_DIR="$script_dir/downloads"
+
+# Look for cookie and user agent: script setting, then environment variable, then file
 [[ -z "$COOKIE" && -n "$MMF_COOKIE" ]] && COOKIE="$MMF_COOKIE"
 [[ -z "$COOKIE" && -f "$script_dir/$COOKIE_FILE" ]] && COOKIE="$(tr -d '\r\n' < "$script_dir/$COOKIE_FILE")"
 [[ -z "$USER_AGENT" && -n "$MMF_USER_AGENT" ]] && USER_AGENT="$MMF_USER_AGENT"
@@ -47,7 +48,9 @@ if [[ -z "$USER_AGENT" ]]; then
     echo -e "${RED}Error: no user agent set (USER_AGENT, $USER_AGENT_FILE, or MMF_USER_AGENT). Run navigator.userAgent in your browser console.${NC}"
     exit 1
 fi
-if [[ ! -f "model_ids.txt" ]]; then
+ids_file="model_ids.txt"   # in the current folder, or next to this script
+[[ ! -f "$ids_file" && -f "$script_dir/$ids_file" ]] && ids_file="$script_dir/$ids_file"
+if [[ ! -f "$ids_file" ]]; then
     echo -e "${RED}Error: model_ids.txt not found!${NC}"
     echo "Create a file with one model ID per line."
     exit 1
@@ -66,7 +69,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     else
         echo -e "${YELLOW}Skipping invalid line: '$line'${NC}"
     fi
-done < model_ids.txt
+done < "$ids_file"
 
 total=${#ids[@]}
 if (( total == 0 )); then

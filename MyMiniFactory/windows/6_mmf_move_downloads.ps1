@@ -13,19 +13,23 @@
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-# Root folder for all downloads. Set the PRINTS_DIR environment variable
-# (e.g. setx PRINTS_DIR "D:\3DPrints") or change the default here.
-$PRINTS_DIR = if ($env:PRINTS_DIR) { $env:PRINTS_DIR } else { Join-Path $HOME '3DPrints' }
+# Folders. Leave empty for the defaults, or put a full path here, e.g. 'D:\MyMiniFactory\models'.
 # Where your browser's download manager saves MyMiniFactory files
-# (set MMF_DOWNLOAD_PATH or change the default here).
-$DOWN_PATH = if ($env:MMF_DOWNLOAD_PATH) { $env:MMF_DOWNLOAD_PATH } else { Join-Path $HOME 'Downloads\www.myminifactory.com\download' }
-$MODELS_PATH  = Join-Path $PRINTS_DIR '.mmf_downloads\models'
-$JSON_PATH = Join-Path $PRINTS_DIR '.mmf_downloads\downloads'
+# (empty = Downloads\www.myminifactory.com\download in your user folder).
+$DOWN_PATH = ''
+# model_<id> folders (empty = the "models" folder next to this script).
+$MODELS_PATH = ''
+# JSON metadata from step 2 (empty = the "downloads" folder next to this script).
+$JSON_PATH = ''
 
 # $true  = only show what would be moved, change nothing
 # $false = actually move files and remove emptied folders
 $DRY_RUN = $true
 # ============================================================================
+
+if (-not $DOWN_PATH)   { $DOWN_PATH   = Join-Path $HOME 'Downloads\www.myminifactory.com\download' }
+if (-not $MODELS_PATH) { $MODELS_PATH = Join-Path $PSScriptRoot 'models' }
+if (-not $JSON_PATH)   { $JSON_PATH   = Join-Path $PSScriptRoot 'downloads' }
 
 $JUNK_FILES   = @('Thumbs.db', 'desktop.ini', '.DS_Store')
 $PARTIAL_EXTS = @('.crdownload', '.part', '.partial', '.tmp', '.download')
