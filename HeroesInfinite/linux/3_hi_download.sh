@@ -221,7 +221,8 @@ NOT_DOWNLOADED_MARK="(recorded with MARK_ALL_DOWNLOADED)"
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")
 (( ${#lines[@]} > 1 )) || { echo -e "${RED}The list is empty.${NC}"; exit 1; }
-IFS=$'\t' read -r -a header <<< "${lines[0]}"
+# Split on tabs via \x1f: with a tab in IFS, empty columns would be merged and the rest would shift
+IFS=$'\x1f' read -r -a header <<< "${lines[0]//$'\t'/$'\x1f'}"
 declare -A col=()
 for i in "${!header[@]}"; do col["${header[$i],,}"]=$i; done
 for c in collection id url; do
@@ -237,7 +238,7 @@ declare -A seen=()
 for (( n = 1; n < ${#lines[@]}; n++ )); do
     line="${lines[$n]}"
     [[ -z "${line//[[:space:]]/}" ]] && continue
-    IFS=$'\t' read -r -a f <<< "$line"
+    IFS=$'\x1f' read -r -a f <<< "${line//$'\t'/$'\x1f'}"
     collection="${f[${col[collection]}]}"
     post="${f[${col[post]:-99}]}"
     label="${f[${col[label]:-99}]}"

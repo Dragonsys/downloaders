@@ -1,6 +1,13 @@
-# Loot Studios - All Bundle downloader
+# Loot Studios - bundle downloader
 
-Downloads the **All Bundle** archives (for example `All_FaewoodHaven_32mm.zip`, `..._75mm.zip`, `..._Bust.zip`) for every bundle you own, straight to your storage (e.g. a NAS).
+Downloads, for every bundle you own, straight to your storage (e.g. a NAS):
+
+- the **All Bundle** archives (for example `All_FaewoodHaven_32mm.zip`, `..._75mm.zip`, `..._Bust.zip`);
+- the **individual figure files** wherever there's no All Bundle archive - for a bundle that has no All Bundle at all, or for a scale or material it doesn't cover (e.g. FDM files when the All Bundle is resin only);
+- the **extra contents**: magazine, digital magazine and statblocks;
+- each figure's **images**: the render and, where one exists, the painted version (resin and FDM).
+
+Each bundle gets one folder: the All Bundle archives and extras at the top, individual figure files in a subfolder per group (`Heroes`, `Enemies`, `Bust`, ...), and images in `Images/<group>/`, named after the figure (`Awyn, Arcane Investigator - painted resin.jpg`). Bundles that are shown on the site but aren't in your account are skipped.
 
 It works in two halves:
 
@@ -13,10 +20,11 @@ It works in two halves:
 
 | File | Where | Purpose |
 |---|---|---|
-| `browser/1_loot_collect_all_bundles.js` | Browser Console | Collects the All Bundle links from all bundles on a My Loots page |
+| `browser/1_loot_collect_all_bundles.js` | Browser Console | Collects the download links (All Bundle, individual files, extras) from all bundles on a My Loots page |
 | `browser/2_loot_export_list.js` | Browser Console | Copies the collected list to the clipboard |
 | `linux/3_loot_download_all_bundles.sh` | Linux | Checks what's already downloaded and downloads what's missing |
 | `browser/99_loot_reset.js` | Browser Console | Forgets everything collected (only if you want to start fresh) |
+| `linux/99_loot_fix_folders.sh` | Linux | One-off: moves newer bundles out of the `Fantasy/` folder older versions put them in (see below) |
 
 ---
 
@@ -48,7 +56,14 @@ It works in two halves:
    | `LOOT_DIR` | empty (the script's folder) | Where the bundles are stored; put a full path here to use another folder |
    | `ORGANIZE` | `"folder"` | `"folder"` → `FaewoodHaven/All_FaewoodHaven_Bust.zip`; `"bundle"` → `Faewood Haven/...` |
    | `MATERIALS` | empty (all) | e.g. `"resin"` to skip FDM versions |
-   | `SCALES` | empty (all) | e.g. `"32mm bust"` to skip 75mm |
+   | `SCALES` | empty (all) | e.g. `"32mm bust"` to skip 75mm (scales on the site: `32mm`, `75mm`, `bust`, `other`) |
+   | `INDIVIDUAL` | `1` | Individual figure files where there's no All Bundle archive; `0` = All Bundle archives only |
+   | `VARIANTS` | empty (all) | Individual files: only these kinds, e.g. `"hollow"` (`all`, `hollow`, `solid`, `slicer`, `unsupported`) |
+   | `EXTRAS` | `1` | Magazine, digital magazine and statblocks; `0` = skip them |
+   | `IMAGES` | `1` | Figure images; `0` = skip them |
+   | `IMAGE_TYPES` | empty (all) | Only these images, e.g. `"painted"` (`render`, `painted`) |
+   | `IMAGE_DELAY_SECONDS` | `1` | Pause between images (they're small) |
+   | `UNAVAILABLE_RECHECK_DAYS` | `30` | Images and magazines the site doesn't have are looked for again after this many days |
    | `DELAY_SECONDS` | `5` | Pause between downloads |
    | `MAX_DOWNLOADS` | `0` (no limit) | Set to `2` for your first test |
    | `SKIP_DOWNLOADED` | `1` | Skip files recorded as downloaded even if you've deleted them since (see below); `0` = download them again if they're gone |
@@ -65,7 +80,7 @@ Do this once (Chrome remembers it):
 
 ## Each round (collect → export → download)
 
-### Step 1 - Collect the links (browser, ~10 seconds per bundle)
+### Step 1 - Collect the links (browser, ~10-15 seconds per bundle)
 
 1. Log in at **app.lootstudios.com**.
 2. Hover **My Loots** and open **Fantasy**.
@@ -76,7 +91,9 @@ Do this once (Chrome remembers it):
    - Otherwise leave the settings alone. The collector automatically re-reads every bundle whose saved links have expired (or expire within 10 minutes) and skips bundles whose links are still fresh, so each round gets fresh links by itself. (`RESCAN = true` forces it to re-read everything.)
 6. Copy the whole file, paste it into the Console, press **Enter**.
 7. Wait for the line starting with **DONE**. Progress lines look like:
-   `[12/86] Faewood Haven: 32mm resin, 75mm resin, bust resin`
+   `[12/86] Faewood Haven: All Bundle 32mm resin, 75mm resin, bust resin + 1 individual file(s) (not in the All Bundle: 32mm fdm) + Magazine, Statblocks`
+
+   Bundles that appear on the page but aren't in your account (for example a new release shown at the top) are listed as `not in your account - skipped`.
 
    The same progress appears in a **status panel at the bottom right of the page**, so you can close DevTools once it has started (the ✕ only closes the panel; the collector keeps running).
 
@@ -134,7 +151,7 @@ If the summary shows **Expired links** or downloads stopped because links expire
 
 ## Deleting the zips after extracting
 
-You don't have to keep the downloaded zips. Every finished file is recorded in **`.loot_downloaded.tsv`** in your Loot Studios folder, and with `SKIP_DOWNLOADED=1` (the default) a recorded file is never downloaded again, even after you've extracted it, imported it into your model manager and deleted the zip. **Keep `.loot_downloaded.tsv`** - it's what remembers what you have.
+You don't have to keep the downloaded zips. Every finished file is recorded in **`.loot_downloaded.tsv`** in your Loot Studios folder, and with `SKIP_DOWNLOADED=1` (the default) a recorded file is never downloaded again, even after you've extracted it, imported it into your model manager and deleted the zip. **Keep `.loot_downloaded.tsv`** - it's what remembers what you have. (`.loot_unavailable.tsv` next to it lists images and magazines the site doesn't have; deleting it only means they're looked for once more.)
 
 - Files already in the folder are recorded the first time the downloader runs. So run the downloader **once before deleting** zips you downloaded before this feature existed.
 - **Already deleted everything you had?** Collect and export as usual (Step 1-2), set `MARK_ALL_DOWNLOADED=1`, and run the downloader once: it downloads nothing and records every file in the list as downloaded. Set it back to `0`. From then on only bundles that weren't in that list are downloaded. Only do this with a list that contains just what you already have.
@@ -154,6 +171,25 @@ and run it (see the MyMiniFactory guide, step 8). Each zip is extracted into its
 
 ---
 
+## One-off: fix the folders of newer bundles
+
+Newer bundles have download links like `new-dls.loot-studios.com/Fantasy/ShadowCourt/...`. Older versions of the downloader named the folder after the first part, so the All Bundle archives of **all** newer bundles ended up together in one `Fantasy` folder (or `SciFi`, ...). Current versions use the bundle's own folder (`ShadowCourt`). To move the files you already have:
+
+1. Collect and export as usual (Step 1-2), so `loot_all_bundles.tsv` lists your bundles (any version of the list works - only the download links are used).
+2. Copy `linux/99_loot_fix_folders.sh` next to the downloader and run it:
+
+   ```bash
+   cd /mnt/nas/3DPrints/LootStudios
+   bash 99_loot_fix_folders.sh
+   ```
+
+   It starts as a **dry run** and only shows what it would move (`Fantasy/All_ShadowCourt_32mm.zip => ShadowCourt/All_ShadowCourt_32mm.zip`).
+3. If that looks right, open the script, set `DRY_RUN=0`, and run it again. It moves the files, updates their paths in `.loot_downloaded.tsv` (the old one is kept as `.loot_downloaded.tsv.bak`), and removes the old folder once it's empty.
+
+Files you've already extracted and deleted are only updated in `.loot_downloaded.tsv`. If two newer bundles have an archive with the **same name** (e.g. `All_32mm.zip`), they overwrote each other in the shared folder; the script leaves that file alone and lists it - delete it and its lines in `.loot_downloaded.tsv` to download both again. Running the script again is harmless.
+
+---
+
 ## Troubleshooting
 
 | Message | What to do |
@@ -163,7 +199,9 @@ and run it (see the MyMiniFactory guide, step 8). Each zip is extracted into its
 | Collector: `redirected to the login page` | Log in again and rerun |
 | Collector: `does not allow its pages to be opened in a frame` | The site changed how it works - the collector needs updating |
 | Collector: `no bundle data after 45s` | The page loaded slowly; it's retried on the next run. If it happens for every bundle, the site changed |
-| Collector: `no All Bundle downloads` | That bundle has no All Bundle section (yet). It's checked again after 24 hours (`NO_ALL_RECHECK_HOURS`), so new purchases and releases are picked up once the section appears; set it to `0` to check every run. Download it by hand if it never gets one |
+| Collector: `not in your account - skipped` | The bundle is shown on the page but you don't own it, so there's nothing to download. It's checked again after 24 hours (`RECHECK_HOURS`), in case you buy it |
+| Collector: `no downloads on the page` | The bundle page has no download links at all (yet). Checked again after 24 hours (`RECHECK_HOURS`; `0` = every run) |
+| Downloader: `- not on the site (HTTP 404)` | The site doesn't have that file. For images that's normal: the site only guesses image addresses, and many figures have no painted or no FDM image. For magazines/statblocks the link on the bundle page is broken (the button in the browser fails too). It's remembered in `.loot_unavailable.tsv`, counted as done, and looked for again after `UNAVAILABLE_RECHECK_DAYS` (30); nothing to do. Delete a line from that file to try it again sooner |
 | Downloader: `List file not found` | Save the export as `loot_all_bundles.tsv` in your Loot Studios folder, next to the downloader (Step 2) |
 | Downloader: `The list has no 'url' column` | Re-export with `2_loot_export_list.js` and save with "All files", not ".txt" |
 | Downloader: `3 refused downloads in a row` | Links expired - do another round |

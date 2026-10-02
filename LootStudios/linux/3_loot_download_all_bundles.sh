@@ -1,6 +1,6 @@
 #!/bin/bash
 # ================================================================
-# Loot Studios "All Bundle" checker + downloader
+# Loot Studios checker + downloader (All Bundle archives, individual figure files, magazines)
 # Reads the list exported by 1_loot_collect_all_bundles.js (tab-separated, with
 # a header row) and downloads every file that isn't downloaded yet.
 #
@@ -33,6 +33,19 @@ ORGANIZE="folder"
 MATERIALS=""          # only these materials, e.g. "resin" or "resin fdm"; empty = all
 SCALES=""             # only these scales, e.g. "32mm bust"; empty = all
 
+INDIVIDUAL=1          # 1 = download the individual figure files when a bundle has no All Bundle
+                      #     for that scale and material; 0 = All Bundle archives only
+VARIANTS=""           # individual files: only these kinds, e.g. "hollow"; empty = all
+                      #     (all, hollow, solid, slicer, unsupported)
+EXTRAS=1              # 1 = also download the magazine, digital magazine and statblocks
+IMAGES=1              # 1 = also download each figure's images (into <bundle>/Images/<group>/)
+IMAGE_TYPES=""        # only these images, e.g. "painted"; empty = all ("render painted")
+IMAGE_DELAY_SECONDS=1 # pause between images (small files)
+# Images that don't exist (many figures have no painted or FDM image) and magazine
+# links that are broken on the site are remembered in LOOT_DIR/.loot_unavailable.tsv
+# and only tried again after this many days:
+UNAVAILABLE_RECHECK_DAYS=30
+
 # Every finished file is recorded in LOOT_DIR/.loot_downloaded.tsv (keep that file!).
 SKIP_DOWNLOADED=1     # 1 = skip files recorded as downloaded, even if you've since extracted
                       #     and deleted them; 0 = download them again if they're no longer there
@@ -57,12 +70,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOOT_DIR="${LOOT_DIR%/}"
 
 LEDGER="$LOOT_DIR/.loot_downloaded.tsv"   # record of finished files (key, path, date)
+UNAVAILABLE="$LOOT_DIR/.loot_unavailable.tsv"   # files the site doesn't have (key, unix time, reason)
 MISSING_OUT="loot_missing.tsv"     # rows still missing after this run (same format as the input)
 FAILED_OUT="loot_failed.txt"       # failures with reasons
 EXPIRED_OUT="loot_expired.txt"     # bundles whose links need refreshing
 DONE_JS="loot_done_bundles.js"     # paste into the Console so the collector skips finished bundles
 
-echo -e "${BLUE}Loot Studios All Bundle downloader${NC}"
+echo -e "${BLUE}Loot Studios downloader${NC}"
 printf "List file:   ${YELLOW}%s${NC}\n" "$LIST_FILE"
 printf "Destination: ${YELLOW}%s${NC} (organized by %s)\n" "$LOOT_DIR" "$ORGANIZE"
 if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
@@ -106,6 +120,9 @@ verify_archive() {
     local f="$1" magic
     magic=$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')
     case "${f,,}" in
+        *.png) [[ "$magic" == 89504e47* ]] || { LAST_ERROR="not a PNG image"; return 1; } ;;
+        *.jpg|*.jpeg) [[ "$magic" == ffd8ff* ]] || { LAST_ERROR="not a JPEG image"; return 1; } ;;
+        *.pdf) [[ "$magic" == 25504446* ]] || { LAST_ERROR="not a PDF file"; return 1; } ;;
         *.zip)
             [[ "$magic" == 504b0304* || "$magic" == 504b0506* ]] || { LAST_ERROR="not a zip file (got: $(head -c 60 "$f" | tr -cd '[:print:]'))"; return 1; }
             command -v unzip &>/dev/null || return 2
@@ -169,7 +186,8 @@ download_file() {
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")
 (( ${#lines[@]} > 1 )) || { echo -e "${RED}The list is empty.${NC}"; exit 1; }
-IFS=$'\t' read -r -a header <<< "${lines[0]}"
+# Split on tabs via \x1f: with a tab in IFS, empty columns would be merged and the rest would shift
+IFS=$'\x1f' read -r -a header <<< "${lines[0]//$'\t'/$'\x1f'}"
 declare -A col=()
 for i in "${!header[@]}"; do col["${header[$i],,}"]=$i; done
 for c in bundle file url; do
@@ -185,17 +203,25 @@ parse_row() {
     local line="$1"
     ROW_OK=0
     [[ -z "${line//[[:space:]]/}" ]] && return
-    IFS=$'\t' read -r -a f <<< "$line"
+    IFS=$'\x1f' read -r -a f <<< "${line//$'\t'/$'\x1f'}"
     bundle="${f[${col[bundle]}]}"
     folder="${f[${col[folder]:-99}]}"
     scale="${f[${col[scale]:-99}]}"
     material="${f[${col[material]:-99}]}"
     file="${f[${col[file]}]}"
     url="${f[${col[url]}]}"
-    [[ -z "$file" || -z "$url" ]] && return
+    kind="${f[${col[kind]:-99}]}"; [[ -z "$kind" ]] && kind="all"   # all / item / extra (older lists: all)
+    group="${f[${col[group]:-99}]}"
+    item="${f[${col[item]:-99}]}"
+    variant="${f[${col[variant]:-99}]}"
+    [[ -z "$file" || ! "$url" =~ ^https?:// ]] && return
     if [[ "$ORGANIZE" == "bundle" || -z "$folder" ]]; then dir="$(safe_name "$bundle")"; else dir="$(safe_name "$folder")"; fi
     [[ -z "$dir" ]] && dir="Unknown bundle"
-    dest="$LOOT_DIR/$dir/$(safe_name "$file")"
+    # Inside the bundle folder: All Bundle archives and extras at the top, figures per group
+    inner="$(safe_name "$file")"
+    if [[ "$kind" == "item" ]]; then sub="$(safe_name "$group")"; inner="${sub:-Figures}/$inner"; fi
+    if [[ "$kind" == "image" ]]; then sub="$(safe_name "$group")"; inner="Images/${sub:-Figures}/$inner"; fi
+    dest="$LOOT_DIR/$dir/$inner"
     page="${f[${col[page]:-99}]}"
     # Stable id for the ledger (the link itself changes every time it is refreshed)
     key="${page:-$bundle}|$scale|$material|$file"
@@ -217,6 +243,18 @@ record() {   # record KEY PATH
     printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"
 }
 
+# ---------- files the site doesn't have: key <TAB> unix time <TAB> reason ----------
+declare -A unavail_at=()
+if [[ -f "$UNAVAILABLE" ]]; then
+    while IFS=$'\t' read -r lkey ltime _; do
+        [[ -n "$lkey" && "$ltime" =~ ^[0-9]+$ ]] && unavail_at[$lkey]="$ltime"
+    done < <(tr -d '\r' < "$UNAVAILABLE")
+fi
+mark_unavailable() {   # mark_unavailable KEY REASON
+    unavail_at[$1]=$(date +%s)
+    printf '%s\t%s\t%s\n' "$1" "${unavail_at[$1]}" "$2" >> "$UNAVAILABLE"
+}
+
 # If the list holds several links for the same file (e.g. an older export), use the newest one
 declare -A best_row=() best_time=()
 for (( n = 1; n < ${#lines[@]}; n++ )); do
@@ -227,7 +265,7 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 done
 
 now=$(date +%s)
-total=0; present=0; downloaded=0; failed=0; expired=0; filtered=0; unchecked=0; marked=0
+total=0; present=0; downloaded=0; failed=0; expired=0; filtered=0; unchecked=0; marked=0; unavailable=0
 refused_streak=0; attempts=0; first_download=1; stopped=""
 declare -A expired_bundles=() page_files=() page_done=()
 keep_missing() { printf '%s\n' "$line" >> "$MISSING_OUT"; }   # uses the current $line
@@ -237,16 +275,33 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     line="${lines[$n]}"
     parse_row "$line"; (( ROW_OK )) || continue
     (( ${best_row[$dest]} == n )) || continue      # an older link for the same file
-    if ! in_list "$material" "$MATERIALS" || ! in_list "$scale" "$SCALES"; then ((filtered++)); continue; fi
+    if [[ "$kind" == "extra" ]]; then
+        (( EXTRAS )) || { ((filtered++)); continue; }
+    elif [[ "$kind" == "image" ]]; then
+        if (( ! IMAGES )) || ! in_list "$variant" "$IMAGE_TYPES" || ! in_list "$material" "$MATERIALS"; then ((filtered++)); continue; fi
+    else
+        if ! in_list "$material" "$MATERIALS" || ! in_list "$scale" "$SCALES"; then ((filtered++)); continue; fi
+        if [[ "$kind" == "item" ]] && { (( ! INDIVIDUAL )) || ! in_list "$variant" "$VARIANTS"; }; then ((filtered++)); continue; fi
+    fi
     ((total++))
     [[ -n "$page" ]] && page_files[$page]=$(( ${page_files[$page]:-0} + 1 ))
 
-    label="$bundle - ${scale:+$scale }${material:+$material }($file)"
+    case "$kind" in
+        item)  label="$bundle - $item ${scale:+$scale }${material:+$material }${variant:+$variant }($file)" ;;
+        extra) label="$bundle - ${item:-extra} ($file)" ;;
+        image) label="$bundle - $item - $variant image ${material}" ;;
+        *)     label="$bundle - ${scale:+$scale }${material:+$material }($file)" ;;
+    esac
 
     # Recorded as downloaded on an earlier run (the file may have been extracted and deleted since)
     if [[ -n "${recorded[$key]}" ]] && { (( SKIP_DOWNLOADED )) || [[ -s "$LOOT_DIR/${recorded[$key]}" ]]; }; then
         ((present++)); is_done
         printf "  ${GREEN}✓${NC} %s\n" "$label"
+        continue
+    fi
+    # Not on the site when last tried (e.g. no painted image for this figure): skip until it's time to look again
+    if [[ -n "${unavail_at[$key]}" ]] && (( $(date +%s) - ${unavail_at[$key]} < UNAVAILABLE_RECHECK_DAYS * 86400 )); then
+        ((unavailable++)); is_done
         continue
     fi
     if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
@@ -265,11 +320,15 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     # Also accept the file in this bundle's other possible folder (the other
     # ORGANIZE setting), so changing ORGANIZE doesn't cause re-downloads.
     # Never look in other bundles' folders: many bundles use the same file
-    # names (e.g. All_75mm.zip).
+    # names (e.g. All_75mm.zip). Older versions named the folder of newer
+    # bundles after the first part of the link (e.g. "Fantasy"), so All Bundle
+    # archives are looked for there too.
     elsewhere=""
-    for alt in "$(safe_name "$folder")" "$(safe_name "$bundle")"; do
+    legacy=""
+    if [[ "$kind" == "all" ]]; then legacy="${url#*://}"; legacy="${legacy#*/}"; legacy="$(safe_name "${legacy%%/*}")"; fi
+    for alt in "$(safe_name "$folder")" "$(safe_name "$bundle")" "$legacy"; do
         [[ -n "$alt" ]] || continue
-        cand="$LOOT_DIR/$alt/$(safe_name "$file")"
+        cand="$LOOT_DIR/$alt/$inner"
         if [[ "$cand" != "$dest" && -s "$cand" ]]; then elsewhere="$cand"; break; fi
     done
     if [[ -n "$elsewhere" ]]; then
@@ -302,7 +361,9 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         fi
     fi
 
-    (( first_download )) || sleep "$DELAY_SECONDS"
+    if (( ! first_download )); then
+        if [[ "$kind" == "image" ]]; then sleep "$IMAGE_DELAY_SECONDS"; else sleep "$DELAY_SECONDS"; fi
+    fi
     first_download=0
     ((attempts++))
     printf "  ${BLUE}↓ Downloading${NC} %s -> %s ...\n" "$label" "${dest#"$LOOT_DIR/"}"
@@ -330,6 +391,14 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         continue
     fi
 
+    # Image and magazine links don't expire: a refusal means the site doesn't have that file
+    # (most figures have no painted or FDM image). Remember it and look again in UNAVAILABLE_RECHECK_DAYS.
+    if (( result == 2 )) && [[ "$kind" == "extra" || "$kind" == "image" ]]; then
+        mark_unavailable "$key" "${LAST_ERROR%% (*}"
+        ((unavailable++)); is_done
+        printf "  ${YELLOW}- not on the site${NC} (%s) - checked again in %s days\n" "${LAST_ERROR%% (*}" "$UNAVAILABLE_RECHECK_DAYS"
+        continue
+    fi
     ((failed++))
     printf "  ${RED}✗ Download failed:${NC} %s\n" "$LAST_ERROR"
     printf '%s\t%s\t%s\n' "$bundle" "$file" "$LAST_ERROR" >> "$FAILED_OUT"
@@ -346,7 +415,7 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 done
 
 for b in "${!expired_bundles[@]}"; do echo "$b"; done | sort > "$EXPIRED_OUT"
-missing=$((total - present - downloaded - marked))
+missing=$((total - present - downloaded - marked - unavailable))
 
 # Bundles whose files are all downloaded -> snippet for the collector, so it doesn't re-read them
 done_pages=()
@@ -372,11 +441,12 @@ fi
 
 echo ""
 echo -e "${YELLOW}================================================${NC}"
-echo -e " Files in list:          ${BLUE}${total}${NC}$( (( filtered )) && echo "  (+$filtered skipped by MATERIALS/SCALES)")"
+echo -e " Files in list:          ${BLUE}${total}${NC}$( (( filtered )) && echo "  (+$filtered skipped by your settings: MATERIALS, SCALES, INDIVIDUAL, VARIANTS, EXTRAS, IMAGES)")"
 echo -e " Already downloaded:     ${GREEN}${present}${NC}"
 (( marked )) && echo -e " Recorded as downloaded: ${GREEN}${marked}${NC} (MARK_ALL_DOWNLOADED - nothing was downloaded)"
 echo -e " Downloaded this run:    ${GREEN}${downloaded}${NC}"
 echo -e " Expired links:          ${YELLOW}${expired}${NC}"
+echo -e " Not on the site:        ${unavailable} (e.g. figures without a painted image; looked for again after ${UNAVAILABLE_RECHECK_DAYS} days)"
 echo -e " Failed:                 ${RED}${failed}${NC}"
 echo -e " Still missing:          ${RED}${missing}${NC}"
 echo -e "${YELLOW}================================================${NC}"

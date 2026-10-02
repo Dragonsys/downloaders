@@ -7,4 +7,5 @@ localStorage.removeItem('lootBundlePages');
 localStorage.removeItem('lootBundleNames');
 localStorage.removeItem('lootNoAllChecked');
 localStorage.removeItem('lootDonePages');
+localStorage.removeItem('lootImages');
 'Collector data cleared.'
