@@ -59,6 +59,11 @@ BASE_URL="https://www.myminifactory.com"
 # no cookie is sent). Saved in models/model_<id>/Images/, skipped if already there.
 # ------------------------------
 IMAGES=1                # 1 = download each model's images, 0 = don't
+IMAGES_ONLY=0           # 1 = only download images: no file check, and missing_downloads.txt and the
+                        #     reports are left as they are (e.g. to add images to models you already have).
+                        #     Looks for each model's folder in DOWNLOAD_DIR and in models/ next to this script.
+IMAGES_CREATE_FOLDERS=0 # with IMAGES_ONLY=1: 1 = models without a folder get a new "<id>_<name>" folder
+                        #     in DOWNLOAD_DIR for their images; 0 = skip them
 IMAGE_SIZE="large"      # "large" (1000x1000, ~150 KB), "standard" (720x720, ~80 KB)
                         # or "original" (full size, often 1 MB or more - for a big library that adds up)
 IMAGE_DELAY_SECONDS=0.5 # pause between images
@@ -69,6 +74,10 @@ IMAGES_FAILED_FILE="failed_images.txt"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$JSON_DIR" ]] && JSON_DIR="$script_dir/downloads"
 [[ -z "$DOWNLOAD_DIR" ]] && DOWNLOAD_DIR="$script_dir/models"
+DEFAULT_MODELS_DIR="$script_dir/models"
+# Relative paths are relative to this script's folder (e.g. "../.Sort/mmf_library")
+[[ "$JSON_DIR" != /* ]] && JSON_DIR="$script_dir/$JSON_DIR"
+[[ "$DOWNLOAD_DIR" != /* ]] && DOWNLOAD_DIR="$script_dir/$DOWNLOAD_DIR"
 
 # Remove trailing slashes so paths don't contain "//"
 JSON_DIR="${JSON_DIR%/}"
@@ -91,15 +100,25 @@ if [[ $GENERATE_HTML -eq 1 ]]; then printf "HTML report saved to:   ${YELLOW}%s$
 # Check tools
 command -v jq &> /dev/null || { echo -e "${RED}Error: jq not installed.${NC}"; exit 1; }
 
+[[ $IMAGES_ONLY -eq 1 ]] && { IMAGES=1; DOWNLOAD_MISSING=0; }
+
+# User agent: needed for file downloads, and also sent with image requests
+[[ -z "$USER_AGENT" && -n "$MMF_USER_AGENT" ]] && USER_AGENT="$MMF_USER_AGENT"
+[[ -z "$USER_AGENT" && -f "$script_dir/$USER_AGENT_FILE" ]] && USER_AGENT="$(tr -d '\r\n' < "$script_dir/$USER_AGENT_FILE")"
+USER_AGENT="${USER_AGENT#\"}"; USER_AGENT="${USER_AGENT%\"}"   # strip quotes copied from the console
+if [[ $IMAGES -eq 1 ]]; then
+    command -v curl &> /dev/null || { echo -e "${RED}Error: curl not installed.${NC}"; exit 1; }
+    [[ -w "$DOWNLOAD_DIR" ]] || { echo -e "${RED}Error: no write permission for $DOWNLOAD_DIR${NC}"; exit 1; }
+    # Images need no cookie; any normal browser user agent will do
+    IMAGE_USER_AGENT="${USER_AGENT:-Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36}"
+fi
+
 # Download setup
 if [[ $DOWNLOAD_MISSING -eq 1 ]]; then
     command -v curl &> /dev/null || { echo -e "${RED}Error: curl not installed.${NC}"; exit 1; }
     [[ -z "$COOKIE" && -n "$MMF_COOKIE" ]] && COOKIE="$MMF_COOKIE"
     [[ -z "$COOKIE" && -f "$script_dir/$COOKIE_FILE" ]] && COOKIE="$(tr -d '\r\n' < "$script_dir/$COOKIE_FILE")"
     [[ -z "$COOKIE" ]] && { echo -e "${RED}Error: no cookie set (COOKIE, $COOKIE_FILE, or MMF_COOKIE).${NC}"; exit 1; }
-    [[ -z "$USER_AGENT" && -n "$MMF_USER_AGENT" ]] && USER_AGENT="$MMF_USER_AGENT"
-    [[ -z "$USER_AGENT" && -f "$script_dir/$USER_AGENT_FILE" ]] && USER_AGENT="$(tr -d '\r\n' < "$script_dir/$USER_AGENT_FILE")"
-    USER_AGENT="${USER_AGENT#\"}"; USER_AGENT="${USER_AGENT%\"}"   # strip quotes copied from the console
     [[ -z "$USER_AGENT" ]] && { echo -e "${RED}Error: no user agent set (USER_AGENT, $USER_AGENT_FILE, or MMF_USER_AGENT). Run navigator.userAgent in your browser console.${NC}"; exit 1; }
     [[ -w "$DOWNLOAD_DIR" ]] || { echo -e "${RED}Error: no write permission for $DOWNLOAD_DIR${NC}"; exit 1; }
     printf "Downloading missing files: ${YELLOW}yes${NC} (%ss between downloads%s)\n" "$DELAY_SECONDS" \
@@ -113,7 +132,12 @@ shopt -s nullglob
 json_files=("$JSON_DIR"/model_*.json)
 (( ${#json_files[@]} == 0 )) && { echo -e "${RED}No model_*.json files found.${NC}"; exit 1; }
 
-> "$OUTPUT_FILE"
+if [[ $IMAGES_ONLY -eq 1 ]]; then
+    IMAGES=1; DOWNLOAD_MISSING=0
+    printf "Mode:                  ${YELLOW}images only${NC} (files are not checked; missing_downloads.txt and the reports are left alone)\n\n"
+else
+    > "$OUTPUT_FILE"
+fi
 > "$TEMP_FILE"
 > "$HTML_TEMP"
 [[ $DOWNLOAD_MISSING -eq 1 ]] && > "$FAILED_FILE"
@@ -132,6 +156,7 @@ invalid_json=0
 MISSING_ENTRIES=()
 NO_FILE_MODELS=()
 INVALID_JSON_FILES=()
+NO_FOLDER_MODELS=()
 LAST_ERROR=""
 
 # ------------------------------------------------------------
@@ -243,7 +268,7 @@ fetch_image() {
     while :; do
         hdr=$(mktemp)
         result=$(curl --silent --location --connect-timeout 30 --max-time 300 \
-            -H "User-Agent: $USER_AGENT" -H "Accept: image/*,*/*" \
+            -H "User-Agent: $IMAGE_USER_AGENT" -H "Accept: image/*,*/*" \
             -D "$hdr" -o "$tmp" -w '%{http_code}' "$url")
         rc=$?; code="$result"
         local cf; cf=$(grep -i '^cf-mitigated:' "$hdr"); rm -f "$hdr"
@@ -261,6 +286,7 @@ fetch_image() {
         rm -f "$tmp"
         [[ -n "$cf" ]] && { LAST_ERROR="HTTP $code: blocked by Cloudflare bot check"; return 3; }
         [[ "$code" == "404" || "$code" == "410" ]] && return 4
+        (( rc == 3 )) && { LAST_ERROR="malformed image address (curl exit 3)"; return 1; }   # retrying won't help
         if [[ "$code" == "429" || "$code" == 5?? || "$code" == "000" || -z "$code" ]] && (( attempt < MAX_RETRIES )); then
             attempt=$((attempt + 1))
             wait=$(( BACKOFF_SECONDS * (1 << (attempt - 1)) )); (( wait > 900 )) && wait=900
@@ -271,18 +297,45 @@ fetch_image() {
     done
 }
 
-images_present=0; images_downloaded=0; images_failed=0; images_absent=0; images_stopped=""; first_image=1
+# find_model_dir BASE ID - print the model's folder in BASE: "model_<id>", or the one "<id>_<name>"
+# folder (if there are several, the only one that isn't empty). 0 = found, 1 = none, 2 = several.
+find_model_dir() {
+    local base="$1" id="$2" d nonempty=()
+    [[ -d "$base/model_$id" ]] && { printf '%s' "$base/model_$id"; return 0; }
+    local cands=("$base/${id}"_*/)
+    (( ${#cands[@]} == 0 )) && return 1
+    (( ${#cands[@]} == 1 )) && { printf '%s' "${cands[0]%/}"; return 0; }
+    for d in "${cands[@]}"; do [[ -n "$(ls -A "$d" 2>/dev/null)" ]] && nonempty+=("${d%/}"); done
+    (( ${#nonempty[@]} == 1 )) && { printf '%s' "${nonempty[0]}"; return 0; }
+    return 2
+}
+
+# clean_name NAME - folder name part as 99_mmf_rename_folders_from_json.ps1 makes it
+# (characters Windows doesn't allow and spaces -> "_", at most 80 characters)
+clean_name() {
+    local s="$1"
+    s="$(printf '%s' "$s" | tr -d '\000-\037' | sed 's#[<>:"/\\|?*]#_#g; s/[[:space:]]\+/_/g; s/_\+/_/g')"
+    s="${s:0:80}"
+    s="${s#"${s%%[!_ .]*}"}"; s="${s%"${s##*[!_ .]}"}"
+    printf '%s' "$s"
+}
+
+images_present=0; images_downloaded=0; images_failed=0; images_absent=0; images_skipped=0; images_stopped=""; first_image=1; image_block_streak=0
+folders_created=0
 [[ $IMAGES -eq 1 ]] && : > "$IMAGES_FAILED_FILE"
 
 # do_images JSON MODEL_DIR MODEL_ID - download the model's images that aren't there yet
 do_images() {
-    local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 r
+    local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 absent=0 failed=0 skipped=0 r
     local -A used=()
     mapfile -t img_urls < <(jq -r --arg s "$IMAGE_SIZE" \
         '(.images // [])[] | (.[$s].url // .large.url // .original.url // empty)' "$json" 2>/dev/null)
     (( ${#img_urls[@]} )) || return 0
     for u in "${img_urls[@]}"; do
         n=$((n + 1))
+        # Older metadata points to dl<N>.myminifactory.com/object-assets/..., which is behind the bot
+        # check; the site now serves the same images from assets.myminifactory.com/object-images/...
+        [[ "$u" =~ ^https?://dl[0-9]*\.myminifactory\.com/object-assets/(.*)$ ]] && u="https://assets.myminifactory.com/object-images/${BASH_REMATCH[1]}"
         # Name: the file name without the size prefix ("1000X1000-"), %-escapes decoded
         name="${u%%\?*}"; name="${name##*/}"
         name="$(printf '%b' "${name//'%'/'\x'}")"   # quoted: bash 5.2 treats \ in the replacement differently
@@ -291,23 +344,28 @@ do_images() {
         [[ -n "${used[$name]}" ]] && name="${n}_$name"
         used[$name]=1
         if [[ -s "$dir/$name" ]]; then ((images_present++)); ((have++)); continue; fi
-        [[ -n "$images_stopped" ]] && continue
-        if (( MAX_IMAGE_DOWNLOADS > 0 && images_downloaded + images_failed >= MAX_IMAGE_DOWNLOADS )); then
-            images_stopped="reached MAX_IMAGE_DOWNLOADS ($MAX_IMAGE_DOWNLOADS) for this run"; continue
+        if [[ -z "$images_stopped" ]] && (( MAX_IMAGE_DOWNLOADS > 0 && images_downloaded + images_failed >= MAX_IMAGE_DOWNLOADS )); then
+            images_stopped="reached MAX_IMAGE_DOWNLOADS ($MAX_IMAGE_DOWNLOADS) for this run"
         fi
+        [[ -n "$images_stopped" ]] && { ((skipped++)); ((images_skipped++)); continue; }
         (( first_image )) || sleep "$IMAGE_DELAY_SECONDS"
         first_image=0
         fetch_image "${u// /%20}" "$dir/$name"; r=$?
+        if (( r == 3 )); then image_block_streak=$((image_block_streak + 1)); else image_block_streak=0; fi
         case $r in
             0) ((images_downloaded++)); ((new++)) ;;
-            4) ((images_absent++)) ;;
-            3) images_stopped="$LAST_ERROR"; ((images_failed++))
-               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE" ;;
-            *) ((images_failed++))
-               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE" ;;
+            4) ((images_absent++)); ((absent++)) ;;
+            *) ((images_failed++)); ((failed++))
+               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE"
+               # A bot-check block now and then is skipped; several in a row means: stop
+               (( image_block_streak >= 3 )) && images_stopped="$LAST_ERROR (3 times in a row)" ;;
         esac
     done
-    printf "  ${BLUE}Images:${NC} %s new, %s already there (of %s)\n" "$new" "$have" "${#img_urls[@]}"
+    printf "  ${BLUE}Images:${NC} %s new, %s already there (of %s)" "$new" "$have" "${#img_urls[@]}"
+    (( absent ))  && printf ", ${YELLOW}%s not on the server${NC}" "$absent"
+    (( failed ))  && printf ", ${RED}%s failed${NC}" "$failed"
+    (( skipped )) && printf ", ${YELLOW}%s skipped - image downloads stopped: %s${NC}" "$skipped" "$images_stopped"
+    printf "\n"
 }
 
 # HTML table start
@@ -317,6 +375,16 @@ for json_file in "${json_files[@]}"; do
     model_id=$(basename "$json_file" .json)
     model_id="${model_id#model_}"
     model_dir="${DOWNLOAD_DIR}/model_${model_id}"
+    # Renamed by 99_mmf_rename_folders_from_json.ps1 ("<id>_<name>")? Use that folder.
+    # In IMAGES_ONLY mode also look in models/ next to this script (models not moved to DOWNLOAD_DIR yet).
+    found_dir=""; folder_note=""
+    search_dirs=("$DOWNLOAD_DIR")
+    [[ $IMAGES_ONLY -eq 1 && "$DEFAULT_MODELS_DIR" != "$DOWNLOAD_DIR" && -d "$DEFAULT_MODELS_DIR" ]] && search_dirs+=("$DEFAULT_MODELS_DIR")
+    for base in "${search_dirs[@]}"; do
+        found_dir="$(find_model_dir "$base" "$model_id")" && break
+        found_dir=""
+    done
+    [[ -n "$found_dir" ]] && model_dir="$found_dir"
 
     # Skip files that aren't valid JSON (e.g. saved error pages)
     if ! jq empty "$json_file" 2>/dev/null; then
@@ -336,6 +404,29 @@ for json_file in "${json_files[@]}"; do
     printf "${BLUE}Model %s — %s:${NC}\n" "$model_id" "$model_name"
     echo "model_${model_id} | \"${model_name}\":" >> "$TEMP_FILE"
     echo "<tr><td colspan='2' class='model-header'>Model ${model_id} — ${model_name_html}</td></tr>" >> "$HTML_TEMP"
+    if [[ $IMAGES_ONLY -eq 1 ]]; then
+        if [[ -n "$found_dir" ]]; then
+            do_images "$json_file" "$model_dir" "$model_id"
+            continue
+        fi
+        find_model_dir "$DOWNLOAD_DIR" "$model_id" >/dev/null; [[ $? -eq 2 ]] && several=1 || several=0
+        has_images=$(jq -r '(.images // []) | length' "$json_file" 2>/dev/null)
+        if (( IMAGES_CREATE_FOLDERS && ! several && ${has_images:-0} > 0 )); then
+            # New "<id>_<name>" folder (the name as the rename script makes it), just for the images
+            cname="$(clean_name "$model_name")"
+            model_dir="${DOWNLOAD_DIR}/${model_id}${cname:+_$cname}"
+            printf "  ${BLUE}New folder:${NC} %s\n" "${model_dir##*/}"
+            ((folders_created++))
+            do_images "$json_file" "$model_dir" "$model_id"
+        else
+            if (( several )); then why="several ${model_id}_* folders with files - not sure which"
+            elif [[ "${has_images:-0}" == "0" ]]; then why="no folder, and no images listed"
+            else why="no model_${model_id} or ${model_id}_* folder"; fi
+            printf "  ${YELLOW}Skipped:${NC} %s\n" "$why"
+            NO_FOLDER_MODELS+=("$model_id")
+        fi
+        continue
+    fi
     [[ $IMAGES -eq 1 ]] && do_images "$json_file" "$model_dir" "$model_id"
 
     # Only entries that have both a filename and a download URL
@@ -449,6 +540,19 @@ done
 
 echo "</table>" >> "$HTML_TEMP"
 
+if [[ $IMAGES_ONLY -eq 1 ]]; then
+    rm -f "$TEMP_FILE" "$HTML_TEMP"
+    echo -e "${YELLOW}================================================${NC}"
+    echo -e " Models:                 ${BLUE}${#json_files[@]}${NC}"
+    (( IMAGES_CREATE_FOLDERS )) && echo -e " New folders created:    ${folders_created}"
+    echo -e " Skipped (no folder):    ${YELLOW}${#NO_FOLDER_MODELS[@]}${NC}$( (( ${#NO_FOLDER_MODELS[@]} )) && printf ' - %s' "$(printf '%s ' "${NO_FOLDER_MODELS[@]:0:30}")")"
+    echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed, ${images_skipped} skipped"
+    echo -e "${YELLOW}================================================${NC}"
+    [[ -n "$images_stopped" ]] && echo -e "${YELLOW}Image downloads stopped early: ${images_stopped}${NC}"
+    (( images_failed > 0 )) && echo -e "${RED}Image failures saved to:${NC} ${YELLOW}${IMAGES_FAILED_FILE}${NC}"
+    exit 0
+fi
+
 # Text summary (optional)
 total_present=$((total_expected - total_missing))
 timestamp=$(date +"%Y-%m-%d %H:%M:%S")
@@ -547,7 +651,7 @@ echo -e " Missing files:          ${RED}${total_missing}${NC}"
 echo -e " Models with no files:   ${YELLOW}${no_file_models}${NC}"
 echo -e " Invalid JSON files:     ${YELLOW}${invalid_json}${NC}"
 if [[ $IMAGES -eq 1 ]]; then
-echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed"
+echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed, ${images_skipped} skipped"
 fi
 echo -e "${YELLOW}================================================${NC}"
 [[ -n "$images_stopped" ]] && echo -e "${YELLOW}Image downloads stopped early: ${images_stopped}${NC}"

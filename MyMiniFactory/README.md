@@ -147,8 +147,12 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 | `IMAGE_SIZE` | `"large"` | `"large"` = 1000×1000 (~150 KB), `"standard"` = 720×720, `"original"` = full size (often 1 MB or more each - for thousands of models that's a lot of disk space) |
 | `IMAGE_DELAY_SECONDS` | `0.5` | Pause between pictures |
 | `MAX_IMAGE_DOWNLOADS` | `0` (no limit) | Stop after this many pictures per run |
+| `IMAGES_ONLY` | `0` | `1` = only download pictures: files aren't checked, and `missing_downloads.txt` and the reports are left as they are |
+| `IMAGES_CREATE_FOLDERS` | `0` | With `IMAGES_ONLY=1`: `1` = a model without a folder gets a new `<id>_<name>` folder (named like step 9 names them) for its pictures; `0` = skip it |
 
-The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Private models get their pictures too (`2_mmf_private_models.js` includes them in `private_models.json`).
+The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Older metadata may still point to the old image server (`dl2.myminifactory.com/object-assets/...`, which blocks scripts); the script uses the current address of the same picture instead, so there's no need to download the metadata again. If MyMiniFactory's bot check refuses 3 pictures in a row, picture downloads stop for that run and each model says how many it skipped - run it again later. Private models get their pictures too (`2_mmf_private_models.js` includes them in `private_models.json`).
+
+**Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with step 9, `<id>_<name>`. If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
 
 ### Step 4 - Download the missing files (browser, Windows)
 
@@ -197,7 +201,7 @@ pwsh -ExecutionPolicy Bypass -File .\99_mmf_rename_folders_from_json.ps1
 
 Dry run first, then `$DRY_RUN = $false`. Renames `model_851789` to `851789_Yhal_The_Skygazer`. Every rename is logged in `rename_log.csv`.
 
-**After this, steps 3, 6 and 8 no longer recognise the renamed folders** (they expect `model_<id>`), so only do it once your library is complete.
+**After this, steps 6 and 8 no longer recognise the renamed folders** (they expect `model_<id>`), so only do it once your library is complete. Step 3 does find them (it also looks for a `<id>_<name>` folder).
 
 ---
 
@@ -205,4 +209,4 @@ Dry run first, then `$DRY_RUN = $false`. Renames `model_851789` to `851789_Yhal_
 
 Repeat steps 1-7, with the **"not downloaded"** filter on in step 1 so only the new models are collected. Files already downloaded are skipped, so only the new models are fetched.
 
-If you have already renamed your folders (step 9), step 3 can no longer see the renamed ones and will list them as missing too. In that case, only download the new models in step 4, then run step 9 again to rename their new `model_<id>` folders.
+If you have already renamed your folders (step 9), that's fine: step 3 finds the renamed `<id>_<name>` folders too. New models arrive in `model_<id>` folders (step 6); run step 9 again afterwards to rename them.
