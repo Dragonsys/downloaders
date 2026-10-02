@@ -47,7 +47,13 @@ function Get-ArchiveIndex([string]$jsonDir) {
             continue
         }
         foreach ($item in @($json.files.items)) {
-            if ($null -eq $item -or $null -eq $item.id -or [string]::IsNullOrWhiteSpace($item.filename)) { continue }
+            if ($null -eq $item -or [string]::IsNullOrWhiteSpace($item.filename)) { continue }
+            if ($null -eq $item.id) {
+                # Whole-model archive without an archive id (some private/older objects):
+                # its link is /download/<model id>, so the download manager saves it as "<model id>"
+                if ([string]$item.download_url -match '/download/\d+$') { $script:WholeIndex[$modelId] = [string]$item.filename }
+                continue
+            }
             $index[[string]$item.id] = [pscustomobject]@{ ModelId = $modelId; Filename = [string]$item.filename }
         }
     }
@@ -65,6 +71,7 @@ if (-not (Test-Path -LiteralPath $DOWN_PATH)) { Write-Host "ERROR: Download path
 if (-not (Test-Path -LiteralPath $JSON_PATH)) { Write-Host "ERROR: JSON path not found: $JSON_PATH" -ForegroundColor Red; exit 1 }
 
 $root  = (Resolve-Path -LiteralPath $DOWN_PATH).ProviderPath.TrimEnd('\', '/')
+$script:WholeIndex = @{}   # model ID -> filename, for archives without an archive id
 $index = Get-ArchiveIndex $JSON_PATH
 Write-Host "Loaded $($index.Count) file entries from JSON metadata." -ForegroundColor Gray
 Write-Host ""
@@ -84,6 +91,7 @@ foreach ($file in $files) {
     }
 
     $targetName = $null
+    $targetDir  = $file.DirectoryName
 
     if ($rel -match 'archive_id=(\d+)') {
         $archiveId = $Matches[1]
@@ -97,6 +105,13 @@ foreach ($file in $files) {
         if ($targetName -ne $entry.Filename) {
             Write-Host "Note: '$($entry.Filename)' contains characters Windows does not allow; using '$targetName'" -ForegroundColor Yellow
         }
+    }
+    elseif ($file.Extension -eq '' -and $script:WholeIndex.ContainsKey($file.BaseName) -and $rel -notmatch '=') {
+        # Whole-model archive (no archive_id in the link): the file is just "<model id>".
+        # Give it its real name inside a "<model id>_model" folder, so 6_mmf_move_downloads.ps1
+        # can still tell which model it belongs to.
+        $targetName = Get-SafeFileName $script:WholeIndex[$file.BaseName]
+        $targetDir  = Join-Path $file.DirectoryName ($file.BaseName + '_model')
     }
     elseif ($file.Extension -eq '' -and $file.BaseName -match '^\d+$' -and $file.Directory.Name -match '^[^=]+=(.+)$' -and $Matches[1] -notmatch '^\d+$') {
         # Fallback from the original script: parent folder is "key=<filename>"
@@ -118,23 +133,29 @@ foreach ($file in $files) {
         continue
     }
 
-    $targetPath = Join-Path $file.DirectoryName $targetName
+    $targetPath = Join-Path $targetDir $targetName
+    $shown = $targetPath.Substring($root.Length).TrimStart('\', '/')
     if (Test-Path -LiteralPath $targetPath) {
         Write-Host "Target already exists, not renaming:" -ForegroundColor Red
-        Write-Host "  $rel -> $targetName" -ForegroundColor Gray
+        Write-Host "  $rel -> $shown" -ForegroundColor Gray
         $conflicts++
         continue
     }
 
     if ($DRY_RUN) {
-        Write-Host "Would rename: $rel -> $targetName" -ForegroundColor Cyan
+        Write-Host "Would rename: $rel -> $shown" -ForegroundColor Cyan
         $renamed++
         continue
     }
 
     try {
-        Rename-Item -LiteralPath $file.FullName -NewName $targetName -ErrorAction Stop
-        Write-Host "Renamed: $rel -> $targetName" -ForegroundColor Green
+        if ($targetDir -eq $file.DirectoryName) {
+            Rename-Item -LiteralPath $file.FullName -NewName $targetName -ErrorAction Stop
+        } else {
+            [void][System.IO.Directory]::CreateDirectory($targetDir)
+            [System.IO.File]::Move($file.FullName, $targetPath)
+        }
+        Write-Host "Renamed: $rel -> $shown" -ForegroundColor Green
         $renamed++
     } catch {
         Write-Host "Failed to rename $rel : $($_.Exception.Message)" -ForegroundColor Red

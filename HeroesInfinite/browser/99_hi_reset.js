@@ -4,4 +4,6 @@
 localStorage.removeItem('hiDownloads');
 localStorage.removeItem('hiProducts');
 localStorage.removeItem('hiPosts');
+localStorage.removeItem('hiImages');
+localStorage.removeItem('hiCovers');
 'Collector data cleared.'

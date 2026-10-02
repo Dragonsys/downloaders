@@ -77,6 +77,24 @@ if (( total == 0 )); then
     exit 1
 fi
 
+# Private models (made private by the creator, or taken off sale) are still in your library,
+# but the API answers 404 for them, and MyMiniFactory's bot check blocks scripts from the
+# library's own API. browser/2_mmf_private_models.js reads their file lists in your browser
+# and you save them as private_models.json (next to model_ids.txt); they're taken from there.
+private_file="private_models.json"
+[[ ! -f "$private_file" && -f "$script_dir/$private_file" ]] && private_file="$script_dir/$private_file"
+if [[ -f "$private_file" ]]; then
+    private_file="$(cd "$(dirname "$private_file")" && pwd)/$(basename "$private_file")"
+    if jq -e 'type == "object"' "$private_file" >/dev/null 2>&1; then
+        echo "Private models: using $(jq 'length' "$private_file") file list(s) from private_models.json"
+    else
+        echo -e "${YELLOW}private_models.json is not valid JSON - ignored (save it again from the browser snippet).${NC}"
+        private_file=""
+    fi
+else
+    private_file=""
+fi
+
 mkdir -p "$JSON_OUTPUT_DIR"
 cd "$JSON_OUTPUT_DIR" || exit 1
 : > failed_ids.txt
@@ -89,10 +107,28 @@ echo ""
 current=0
 ok=0
 fail=0
+from_library=0
+not_public=0
+
+# Write model_<id>.json from private_models.json. Returns 0 if it had a file list for this ID.
+from_private_file() {
+    [[ -n "$private_file" ]] || return 1
+    jq -e --arg id "$1" '.[$id] | select(.files.total_count > 0)' "$private_file" > "model_$1.json.tmp" 2>/dev/null \
+        && mv -f "model_$1.json.tmp" "model_$1.json" && return 0
+    rm -f "model_$1.json.tmp"; return 1
+}
 
 for id in "${ids[@]}"; do
     current=$((current + 1))
     echo -e "${BLUE}[$current/$total] Model $id...${NC}"
+
+    # Already in private_models.json: no need to ask the API (it would answer 404)
+    if from_private_file "$id"; then
+        rm -f "error_${id}.txt"
+        echo -e "${GREEN}  OK${NC} (private model - file list from private_models.json)"
+        ok=$((ok + 1)); from_library=$((from_library + 1))
+        continue
+    fi
 
     # Note: no hand-written Accept-Encoding header. --compressed requests only
     # the encodings this curl build can decode (many Windows builds lack br/zstd).
@@ -115,6 +151,14 @@ for id in "${ids[@]}"; do
     else
         fail=$((fail + 1))
         echo "$id" >> failed_ids.txt
+        if [[ $curl_exit -eq 0 && "$http_code" == "404" ]]; then
+            # The usual reason: the model is private now (or was removed) - see private_models.json
+            not_public=$((not_public + 1))
+            echo -e "${RED}  FAILED (HTTP 404 - private or removed model)${NC}"
+            mv -f "model_${id}.json" "error_${id}.txt" 2>/dev/null
+            if (( current < total )); then sleep "$DELAY_SECONDS"; fi
+            continue
+        fi
         echo -e "${RED}  FAILED (curl exit $curl_exit, HTTP $http_code)${NC}"
         if [[ -s "model_${id}.json" ]]; then
             mv "model_${id}.json" "error_${id}.txt"
@@ -133,8 +177,16 @@ done
 
 echo ""
 echo -e "${GREEN}Done. $ok succeeded, $fail failed.${NC}"
+(( from_library > 0 )) && echo "$from_library of them are private models; their file lists came from private_models.json."
 if (( fail > 0 )); then
     echo "Failed IDs are listed in '$JSON_OUTPUT_DIR/failed_ids.txt'."
     echo "Server responses for failures are saved as error_<id>.txt."
+fi
+if (( not_public > 0 )); then
+    echo ""
+    echo -e "${YELLOW}$not_public model(s) answered HTTP 404: usually models the creator has made private (they're still in your library).${NC}"
+    echo "To get them: paste the IDs from failed_ids.txt into browser/2_mmf_private_models.js, run it in the"
+    echo "Console on myminifactory.com/library, save the result as private_models.json next to model_ids.txt,"
+    echo "and run this script again (with failed_ids.txt as model_ids.txt)."
 fi
 echo -e "${BLUE}Next step: run 3_mmf_check_and_download.sh to find the missing files.${NC}"

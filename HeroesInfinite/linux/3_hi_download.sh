@@ -44,6 +44,10 @@ MARK_ALL_DOWNLOADED=0 # 1 = download nothing; record every file in the list as d
                       #     Use once if you already have (or deleted) everything in your current
                       #     list, so that from then on only new collections are downloaded.
 
+IMAGES=1              # 1 = also download the pictures: collection covers (into <collection>/) and
+                      #     the pictures of each post with downloads (into <collection>/<post>/Images/)
+IMAGE_DELAY_SECONDS=1 # pause between pictures (they come from Kajabi's image server, no cookie)
+
 DOWNLOAD=1            # 1 = download missing files, 0 = check only (uses the record of past downloads)
 DELAY_SECONDS=5       # pause between files
 MAX_DOWNLOADS=0       # stop after this many downloads this run (0 = no limit)
@@ -108,6 +112,10 @@ verify_archive() {
     local f="$1" magic
     magic=$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')
     case "${f,,}" in
+        *.png) [[ "$magic" == 89504e47* ]] || { LAST_ERROR="not a PNG image"; return 1; } ;;
+        *.jpg|*.jpeg) [[ "$magic" == ffd8ff* ]] || { LAST_ERROR="not a JPEG image"; return 1; } ;;
+        *.gif) [[ "$magic" == 47494638* ]] || { LAST_ERROR="not a GIF image"; return 1; } ;;
+        *.webp) [[ "$magic" == 52494646* ]] || { LAST_ERROR="not a WebP image"; return 1; } ;;
         *.zip)
             [[ "$magic" == 504b0304* || "$magic" == 504b0506* ]] || { LAST_ERROR="not a zip file (got: $(head -c 60 "$f" | tr -cd '[:print:]'))"; return 1; }
             command -v unzip &>/dev/null || return 2
@@ -232,7 +240,7 @@ done
 printf '%s\n' "${lines[0]}" > "$MISSING_OUT"
 : > "$FAILED_OUT"
 
-total=0; present=0; downloaded=0; failed=0; unchecked=0; marked=0; attempts=0; first_request=1; stopped=""
+total=0; present=0; downloaded=0; failed=0; unchecked=0; marked=0; attempts=0; first_request=1; stopped=""; filtered=0
 declare -A seen=()
 
 for (( n = 1; n < ${#lines[@]}; n++ )); do
@@ -244,14 +252,19 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     label="${f[${col[label]:-99}]}"
     id="${f[${col[id]}]}"
     url="${f[${col[url]}]}"
-    [[ -z "$id" || -z "$url" || -n "${seen[$id]}" ]] && continue
+    kind="${f[${col[kind]:-99}]}"; [[ -z "$kind" ]] && kind="file"   # file / image / cover (older lists: file)
+    [[ -z "$id" || ! "$url" =~ ^https?:// || -n "${seen[$id]}" ]] && continue
     seen[$id]=1
+    if [[ "$kind" != "file" ]] && (( ! IMAGES )); then ((filtered++)); continue; fi
     ((total++))
 
     cdir="$(safe_name "$collection")"; [[ -z "$cdir" ]] && cdir="Unknown collection"
     pdir="$(safe_name "$post")"; [[ -z "$pdir" ]] && pdir="Post"
     if [[ "$ORGANIZE" == "collection" ]]; then reldir="$cdir"; else reldir="$cdir/$pdir"; fi
     what="$collection - ${post:+$post - }${label:-$id}"
+    # Pictures: covers next to the collection's posts, post pictures in an Images subfolder
+    if [[ "$kind" == "cover" ]]; then reldir="$cdir"; what="$collection - cover picture"; fi
+    if [[ "$kind" == "image" ]]; then reldir="$reldir/Images"; what="$collection - ${post:+$post - }picture ${f[${col[name]:-99}]}"; fi
 
     # Already downloaded before? (the file may have been extracted and deleted since)
     if [[ -n "${ledger[$id]}" ]] && { (( SKIP_DOWNLOADED )) || [[ -s "$HI_DIR/${ledger[$id]}" ]]; }; then
@@ -271,10 +284,17 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         printf "  ${RED}✗ MISSING${NC} %s\n" "$what"; printf '%s\n' "$line" >> "$MISSING_OUT"; continue
     fi
 
-    # Ask where the file is (also tells us its name)
-    (( first_request )) || sleep "$DELAY_SECONDS"
+    if (( ! first_request )); then
+        if [[ "$kind" == "file" ]]; then sleep "$DELAY_SECONDS"; else sleep "$IMAGE_DELAY_SECONDS"; fi
+    fi
     first_request=0
-    resolve_link "$url"; r=$?
+    if [[ "$kind" == "file" ]]; then
+        # Ask where the file is (also tells us its name)
+        resolve_link "$url"; r=$?
+    else
+        # Pictures are public files on Kajabi's image server: no cookie, name from the list
+        FILE_URL="$url"; FILE_NAME="${f[${col[name]:-99}]}"; r=0
+    fi
     if (( r != 0 )); then
         ((failed++))
         printf "  ${RED}✗ %s:${NC} %s\n" "$what" "$LAST_ERROR"
@@ -307,13 +327,13 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     for try in 1 2; do
         if fetch_file "$FILE_URL" "$HI_DIR/$relpath"; then ok=1; break; fi
         # A refused file link usually means it expired while waiting: get a fresh one once
-        [[ $try -eq 1 && "$LAST_ERROR" == *"HTTP 403"* ]] || break
+        [[ "$kind" == "file" && $try -eq 1 && "$LAST_ERROR" == *"HTTP 403"* ]] || break
         sleep "$DELAY_SECONDS"; resolve_link "$url" || break
     done
 
     if (( ok )); then
         # Prefer the server's own filename if it differs
-        if [[ -n "$CD_NAME" ]]; then
+        if [[ "$kind" == "file" && -n "$CD_NAME" ]]; then
             cd_safe="$(safe_name "$CD_NAME")"
             if [[ -n "$cd_safe" && "$cd_safe" != "$name" && ! -e "$HI_DIR/$reldir/$cd_safe" ]]; then
                 mv -f "$HI_DIR/$relpath" "$HI_DIR/$reldir/$cd_safe" && relpath="$reldir/$cd_safe"
@@ -344,7 +364,7 @@ done
 missing=$((total - present - downloaded - marked))
 echo ""
 echo -e "${YELLOW}================================================${NC}"
-echo -e " Downloads in list:      ${BLUE}${total}${NC}"
+echo -e " Downloads in list:      ${BLUE}${total}${NC}$( (( filtered )) && echo "  (+$filtered pictures skipped: IMAGES=0)")"
 echo -e " Already downloaded:     ${GREEN}${present}${NC}"
 (( marked )) && echo -e " Recorded as downloaded: ${GREEN}${marked}${NC} (MARK_ALL_DOWNLOADED - nothing was downloaded)"
 echo -e " Downloaded this run:    ${GREEN}${downloaded}${NC}"

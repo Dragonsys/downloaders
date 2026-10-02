@@ -10,6 +10,7 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 |---|---|---|
 | 1 | `browser/1_mmf_collect_model_ids.js` | Browser Console |
 | 2 | `linux/2_mmf_download_metadata.sh` | Linux |
+| 2b | `browser/2_mmf_private_models.js` *(only for private models, see step 2)* | Browser Console |
 | 3 | `linux/3_mmf_check_and_download.sh` | Linux |
 | 4 | *(your browser's download manager)* | Windows |
 | 5 | `windows/5_mmf_correct_filenames.ps1` | Windows |
@@ -108,8 +109,20 @@ This saves one `downloads/model_<id>.json` per model (3 seconds apart). Failed I
 |---|---|
 | `HTTP 401` | Cookie not accepted - save a fresh `cookie.txt` |
 | `HTTP 403` + "Just a moment" | Bot check - make sure `user_agent.txt` matches the browser the cookie came from |
-| `HTTP 404` | Wrong ID, or the model was removed |
+| `FAILED (HTTP 404 - private or removed model)` | Usually a model the creator has made **private** or taken off sale - see below |
+| `OK (private model - file list from private_models.json)` | Its file list came from `private_models.json` (see below) |
 | `HTTP 429` | Too many requests - raise `DELAY_SECONDS` |
+
+#### Private models (HTTP 404)
+
+Models the creator has made private (or taken off sale) stay in your library, but MyMiniFactory's API answers 404 for them, and its bot check blocks scripts from the library's own data. So their file lists are read in your browser instead:
+
+1. Open `browser/2_mmf_private_models.js` in Notepad and paste the IDs from `downloads/failed_ids.txt` between the backticks after `const IDS =`.
+2. On **myminifactory.com/library** (logged in), paste the whole snippet into the Console (F12) and press **Enter**. It lists each model and its files and says `Copied file lists of N model(s)`.
+3. Paste into **Notepad** and save as **`private_models.json`** next to `model_ids.txt` (Save as type: **All files**).
+4. Copy `downloads/failed_ids.txt` over `model_ids.txt` and run `2_mmf_download_metadata.sh` again. The private models now show `OK (private model ...)`.
+
+Then continue with step 3 as usual. Some older private models have one archive without an archive number; your download manager saves it as just `<model id>` (no `archive_id=` folder) - step 5 handles that. If an ID isn't found by the snippet either, the model was really removed.
 
 ### Step 3 - Find what's missing (Linux)
 

@@ -1,8 +1,10 @@
-// Heroes Infinite - collect every download link from your library.
+// Heroes Infinite - collect every download link from your library, plus the images:
+// each collection's cover and, for every post with downloads, its pictures.
 // Run in the browser Console (F12) on https://www.heroesinfinite.com/library while logged in.
 // It reads all library pages, every collection and every post in the background,
 // pausing between pages. Progress is saved in this browser: if it stops, just run it
-// again and it continues where it left off. New collections are picked up on later runs.
+// again and it continues where it left off. New collections are picked up on later runs,
+// and posts read by an older version (without images) are read once more for their pictures.
 // Hide unrelated Console "noise" (red errors/warnings from the site's own scripts): click the
 // gear icon at the top right of the Console, tick "Hide network" and "Selected context only".
 (async () => {
@@ -10,6 +12,7 @@
   const DELAY_MS     = 1500;   // pause between page loads
   const MAX_PRODUCTS = 0;      // only this many collections this run (0 = all); use 1 for a first test
   const RECHECK      = false;  // true = re-read collections and posts already done (e.g. if files were added)
+  const IMAGES       = true;   // also collect images (collection covers, pictures of posts with downloads)
   // ====================
 
   if (!location.pathname.startsWith('/library')) return 'Open your library page (heroesinfinite.com/library) first.';
@@ -52,11 +55,15 @@
   const store    = load('hiDownloads');   // download id -> row
   const products = load('hiProducts');    // collection url -> { title, posts: [[url, title], ...] }
   const posts    = load('hiPosts');       // post url -> number of downloads found
+  const images   = load('hiImages');      // post url -> [collection, post title, [image urls]]
+  const covers   = load('hiCovers');      // collection url -> [collection title, cover image url]
   const save = () => {
     try {
       localStorage.setItem('hiDownloads', JSON.stringify(store));
       localStorage.setItem('hiProducts', JSON.stringify(products));
       localStorage.setItem('hiPosts', JSON.stringify(posts));
+      localStorage.setItem('hiImages', JSON.stringify(images));
+      localStorage.setItem('hiCovers', JSON.stringify(covers));
     } catch (e) { throw new Error('Browser storage is full - export the list now (2_hi_export_list.js); the library is too large for browser storage.'); }
   };
   const clean = s => String(s || '').trim().replace(/\s+/g, ' ');
@@ -80,6 +87,14 @@
     }
   };
   const titleOf = doc => clean((doc.querySelector('h1, h2, .panel__title, .post-title')?.textContent) || doc.title);
+  // Uploaded pictures on Kajabi's image server (not theme files like icons or placeholders)
+  const isUpload = src => /^https:\/\/[^/]*kajabi-cdn\.com\/.*\/sites?\/\d+\//.test(src || '') && !/\/themes\//.test(src);
+  // A post's own pictures: the main one (the "player") and those in the post text - not the
+  // list of other posts, the "next post" preview, the download icons, header or footer
+  const postImages = doc => [...new Set([...doc.querySelectorAll('.player__video img, img')]
+    .filter(i => i.closest('.player__video') || !i.closest('.playlist, .header, .footer, .smart-next, .media-left, .downloads'))
+    .map(i => { try { return new URL(i.getAttribute('src') || '', location.origin).href; } catch (e) { return ''; } })
+    .filter(isUpload))];
 
   let stopped = '';
   try {
@@ -94,6 +109,9 @@
         const t = clean(a.textContent);
         if (!found.has(pth)) { found.set(pth, t); added++; }
         else if (t.length > (found.get(pth) || '').length) found.set(pth, t);
+        const img = a.querySelector('img');   // the collection's cover picture
+        const src = img && new URL(img.getAttribute('src') || '', location.origin).href;
+        if (IMAGES && isUpload(src)) covers[pth] = [covers[pth]?.[0] || '', src];
       });
       log(`Library page ${p}: ${added} new collection(s)`);
       if (!added) break;
@@ -118,10 +136,15 @@
       save();
       log(`[collection ${i + 1}/${list.length}] ${products[pu].title}: ${postList.size} post(s)`);
     }
+    // Covers carry the collection title the downloader uses for the folder
+    Object.keys(covers).forEach(pu => { if (products[pu]) covers[pu][0] = products[pu].title; else if (!found.has(pu)) delete covers[pu]; });
+    save();
 
-    // ---- 3. Posts -> downloads ----
+    // ---- 3. Posts -> downloads and pictures ----
+    // Read: new posts, and posts with downloads whose pictures haven't been collected yet
+    const needsPost = post => RECHECK || posts[post] === undefined || (IMAGES && posts[post] > 0 && !images[post]);
     const todo = [];
-    list.forEach(pu => (products[pu]?.posts || []).forEach(([post]) => { if (RECHECK || posts[post] === undefined) todo.push([pu, post]); }));
+    list.forEach(pu => (products[pu]?.posts || []).forEach(([post]) => { if (needsPost(post)) todo.push([pu, post]); }));
     log(`${todo.length} post(s) to read - about ${Math.ceil(todo.length * (DELAY_MS + 700) / 60000)} minute(s). Progress is shown in the panel at the bottom right. Keep this tab open (DevTools can be closed).`);
 
     for (const [i, [pu, post]] of todo.entries()) {
@@ -144,8 +167,11 @@
                         id: m[1], url: u.origin + u.pathname, post_url: location.origin + post };
       });
       posts[post] = n;
+      // Pictures only for posts with downloads (skips sale banners and announcements)
+      const pics = IMAGES && n > 0 ? postImages(doc) : [];
+      if (IMAGES && n > 0) images[post] = [products[pu].title, postTitle, pics]; else delete images[post];
       save();
-      log(`[post ${i + 1}/${todo.length}] ${products[pu].title} - ${postTitle}: ${n} download(s)`);
+      log(`[post ${i + 1}/${todo.length}] ${products[pu].title} - ${postTitle}: ${n} download(s)${pics.length ? `, ${pics.length} picture(s)` : ''}`);
     }
   } catch (e) {
     stopped = e.message === 'LOGIN' ? 'redirected to the login page - log in again and rerun' : e.message;
@@ -156,8 +182,9 @@
     `Collections read: ${Object.keys(products).length}`,
     `Posts read:       ${Object.keys(posts).length} (${Object.values(posts).filter(n => n > 0).length} with downloads)`,
     `Download links saved: ${total}`,
+    IMAGES ? `Pictures saved:   ${Object.values(images).reduce((s, x) => s + x[2].length, 0)} from posts, ${Object.keys(covers).length} collection cover(s)` : '',
     stopped ? `STOPPED EARLY: ${stopped} (run it again to continue)` : 'Finished. Export the list with 2_hi_export_list.js'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   log('DONE\n' + summary); show('Finished - you can close this panel.', '#7ddc7d');
   return summary;
 })()

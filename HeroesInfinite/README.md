@@ -1,7 +1,9 @@
 # Heroes Infinite - library backup
 
-Collects every download link from your Heroes Infinite library (all library pages, every collection, every post).
-Heroes Infinite runs on **Kajabi**; download links look like `https://www.heroesinfinite.com/courses/downloads/{id}/{name}` and **do not expire**, so you can collect once and download whenever you like.
+Collects every download link from your Heroes Infinite library (all library pages, every collection, every post), plus the pictures: each collection's **cover** and, for every post with downloads, its **pictures** (the main close-up and the pictures in the post text, e.g. `the-Butcher-of-Kings-FULL.jpg`). Posts without downloads (sale banners, announcements) are skipped.
+Heroes Infinite runs on **Kajabi**; download links look like `https://www.heroesinfinite.com/courses/downloads/{id}/{name}` and **do not expire**, so you can collect once and download whenever you like. The pictures are public files on Kajabi's image server; they don't need your cookie and don't expire either.
+
+Layout: `<collection>/<cover>.jpg`, `<collection>/<post>/<files>`, `<collection>/<post>/Images/<pictures>`.
 
 ## Files
 
@@ -24,14 +26,14 @@ Heroes Infinite runs on **Kajabi**; download links look like `https://www.heroes
 4. Copy the whole file, paste into the Console, press **Enter**.
 5. It prints the library pages, each collection with its number of posts, then each post with its number of downloads, and ends with **DONE**. The same progress appears in a **status panel at the bottom right of the page**, so you can close DevTools once it has started (the ✕ only closes the panel; the collector keeps running).
 
-Roughly 1-2 minutes per collection (1.5 s pause between pages). If it stops for any reason (logged out, connection), just run it again - it continues where it left off. Later runs only read new collections; set `RECHECK = true` to re-read everything.
+Roughly 1-2 minutes per collection (1.5 s pause between pages). If it stops for any reason (logged out, connection), just run it again - it continues where it left off. Later runs only read new collections; set `RECHECK = true` to re-read everything. Posts you collected with an older version (before pictures were added) are read once more automatically to get their pictures. `IMAGES = false` in the collector skips pictures.
 
 ## Step 2 - Export the list (browser)
 
 1. Paste `browser/2_hi_export_list.js` into the Console, press **Enter**.
 2. Paste into **Notepad** and save as `hi_downloads.tsv` (Save as type: **All files**, Encoding: **UTF-8**), in your Heroes Infinite folder, next to the downloader (e.g. `Z:\3DPrints\HeroesInfinite`, see Step 3).
 
-Columns: `collection`, `post`, `label`, `name`, `id`, `url`, `post_url`.
+Columns: `collection`, `post`, `label`, `name`, `id`, `url`, `post_url`, `kind` (`file`, `image` = post picture, `cover` = collection cover).
 
 ## Step 3 - One-time Linux setup
 
@@ -56,6 +58,8 @@ Columns: `collection`, `post`, `label`, `name`, `id`, `url`, `post_url`.
    | `ORGANIZE` | `"collection_post"` | `HI_DIR/<collection>/<post>/<file>`; `"collection"` puts all of a collection's files in one folder |
    | `DELAY_SECONDS` | `5` | Pause between files |
    | `MAX_DOWNLOADS` | `0` (no limit) | Set to `2` for your first test |
+   | `IMAGES` | `1` | Pictures (collection covers, post pictures); `0` = files only |
+   | `IMAGE_DELAY_SECONDS` | `1` | Pause between pictures |
    | `SKIP_DOWNLOADED` | `1` | Skip files recorded as downloaded even if you've deleted them since (see below); `0` = download them again if they're gone |
    | `MARK_ALL_DOWNLOADED` | `0` | `1` = download nothing, just record everything in the list as downloaded (see below) |
 
