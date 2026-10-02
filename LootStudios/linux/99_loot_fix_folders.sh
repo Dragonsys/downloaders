@@ -54,7 +54,7 @@ safe_name() {
     s="${s%"${s##*[![:space:].]}"}"
     printf '%s' "$s"
 }
-urldecode() { local s="${1//+/ }"; printf '%b' "${s//%/\\x}"; }
+urldecode() { local s="${1//+/ }"; printf '%b' "${s//'%'/'\x'}"; }   # quoted: bash 5.2 treats \ in the replacement differently
 
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")

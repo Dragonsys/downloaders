@@ -50,8 +50,14 @@
       download_url: `${base}?downloadfile=${p.id}` }));
     if (!items.length) { missing.push(id); console.warn(`${id}: no files found (not in your library?)`); continue; }
     const m = meta[id] || {};
+    // Images: the library gives the 720x720 version (".../images/720X720-<name>"); the other sizes
+    // follow the same pattern, as in api/v2 (original = no prefix, large = "1000X1000-")
+    const images = (m.images || []).map(i => String(i.url || '')).filter(u => /\/images\/\d+X\d+-/.test(u)).map(u => {
+      const [dir, file] = [u.slice(0, u.lastIndexOf('/') + 1), u.slice(u.lastIndexOf('/') + 1).replace(/^\d+X\d+-/, '')];
+      return { original: { url: dir + file }, large: { url: dir + '1000X1000-' + file }, standard: { url: dir + '720X720-' + file } };
+    });
     out[id] = { id: +id, name: m.name || 'UNKNOWN_NAME', url: m.url ? `https://www.myminifactory.com/object/3d-print-${m.url}` : null,
-      source: 'library (object is private or no longer public)', files: { total_count: items.length, items } };
+      source: 'library (object is private or no longer public)', images, files: { total_count: items.length, items } };
     console.log(`${id}: ${out[id].name} - ${items.map(x => x.filename).join(', ')}`);
   }
 

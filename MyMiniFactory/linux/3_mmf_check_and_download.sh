@@ -53,6 +53,17 @@ BACKOFF_SECONDS=30    # first retry wait; doubles each retry unless the server s
 AUTH_FAIL_LIMIT=3     # stop downloading after this many login/bot-check failures in a row
                       # (a refused file is only counted if your cookie also fails the API check)
 BASE_URL="https://www.myminifactory.com"
+
+# ------------------------------
+# IMAGES - the model's pictures (unlike the files, MyMiniFactory lets scripts download these;
+# no cookie is sent). Saved in models/model_<id>/Images/, skipped if already there.
+# ------------------------------
+IMAGES=1                # 1 = download each model's images, 0 = don't
+IMAGE_SIZE="large"      # "large" (1000x1000, ~150 KB), "standard" (720x720, ~80 KB)
+                        # or "original" (full size, often 1 MB or more - for a big library that adds up)
+IMAGE_DELAY_SECONDS=0.5 # pause between images
+MAX_IMAGE_DOWNLOADS=0   # stop downloading images after this many this run (0 = no limit)
+IMAGES_FAILED_FILE="failed_images.txt"
 # ==============================
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -222,6 +233,83 @@ cookie_works() {
     return "${COOKIE_CHECK[$id]}"
 }
 
+# ------------------------------------------------------------
+# fetch_image URL DEST  (no cookie; the image server is public)
+#   0 = downloaded, 1 = failed, 3 = bot check (stop), 4 = not on the server (404)
+# ------------------------------------------------------------
+fetch_image() {
+    local url="$1" dest="$2" tmp="${2}.part" hdr result rc code wait attempt=0 magic
+    mkdir -p "$(dirname "$dest")" || { LAST_ERROR="cannot create folder"; return 1; }
+    while :; do
+        hdr=$(mktemp)
+        result=$(curl --silent --location --connect-timeout 30 --max-time 300 \
+            -H "User-Agent: $USER_AGENT" -H "Accept: image/*,*/*" \
+            -D "$hdr" -o "$tmp" -w '%{http_code}' "$url")
+        rc=$?; code="$result"
+        local cf; cf=$(grep -i '^cf-mitigated:' "$hdr"); rm -f "$hdr"
+        LAST_ERROR="curl exit $rc, HTTP ${code:-none}"
+        if (( rc == 0 )) && [[ "$code" == "200" && -s "$tmp" ]]; then
+            magic=$(head -c 4 "$tmp" | od -An -tx1 | tr -d ' \n')
+            if [[ "$magic" == ffd8ff* || "$magic" == 89504e47* || "$magic" == 47494638* || "$magic" == 52494646* ]]; then
+                mv -f "$tmp" "$dest" && return 0
+                LAST_ERROR="could not move finished download into place"
+            else
+                LAST_ERROR="not an image (got: $(head -c 40 "$tmp" | tr -cd '[:print:]'))"
+            fi
+            rm -f "$tmp"; return 1
+        fi
+        rm -f "$tmp"
+        [[ -n "$cf" ]] && { LAST_ERROR="HTTP $code: blocked by Cloudflare bot check"; return 3; }
+        [[ "$code" == "404" || "$code" == "410" ]] && return 4
+        if [[ "$code" == "429" || "$code" == 5?? || "$code" == "000" || -z "$code" ]] && (( attempt < MAX_RETRIES )); then
+            attempt=$((attempt + 1))
+            wait=$(( BACKOFF_SECONDS * (1 << (attempt - 1)) )); (( wait > 900 )) && wait=900
+            printf "    ${YELLOW}%s - waiting %ss before retry %s/%s${NC}\n" "$LAST_ERROR" "$wait" "$attempt" "$MAX_RETRIES"
+            sleep "$wait"; continue
+        fi
+        return 1
+    done
+}
+
+images_present=0; images_downloaded=0; images_failed=0; images_absent=0; images_stopped=""; first_image=1
+[[ $IMAGES -eq 1 ]] && : > "$IMAGES_FAILED_FILE"
+
+# do_images JSON MODEL_DIR MODEL_ID - download the model's images that aren't there yet
+do_images() {
+    local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 r
+    local -A used=()
+    mapfile -t img_urls < <(jq -r --arg s "$IMAGE_SIZE" \
+        '(.images // [])[] | (.[$s].url // .large.url // .original.url // empty)' "$json" 2>/dev/null)
+    (( ${#img_urls[@]} )) || return 0
+    for u in "${img_urls[@]}"; do
+        n=$((n + 1))
+        # Name: the file name without the size prefix ("1000X1000-"), %-escapes decoded
+        name="${u%%\?*}"; name="${name##*/}"
+        name="$(printf '%b' "${name//'%'/'\x'}")"   # quoted: bash 5.2 treats \ in the replacement differently
+        name="${name#[0-9]*X[0-9]*-}"
+        name="${name//\//_}"; [[ -z "$name" ]] && name="image_$n.jpg"
+        [[ -n "${used[$name]}" ]] && name="${n}_$name"
+        used[$name]=1
+        if [[ -s "$dir/$name" ]]; then ((images_present++)); ((have++)); continue; fi
+        [[ -n "$images_stopped" ]] && continue
+        if (( MAX_IMAGE_DOWNLOADS > 0 && images_downloaded + images_failed >= MAX_IMAGE_DOWNLOADS )); then
+            images_stopped="reached MAX_IMAGE_DOWNLOADS ($MAX_IMAGE_DOWNLOADS) for this run"; continue
+        fi
+        (( first_image )) || sleep "$IMAGE_DELAY_SECONDS"
+        first_image=0
+        fetch_image "${u// /%20}" "$dir/$name"; r=$?
+        case $r in
+            0) ((images_downloaded++)); ((new++)) ;;
+            4) ((images_absent++)) ;;
+            3) images_stopped="$LAST_ERROR"; ((images_failed++))
+               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE" ;;
+            *) ((images_failed++))
+               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE" ;;
+        esac
+    done
+    printf "  ${BLUE}Images:${NC} %s new, %s already there (of %s)\n" "$new" "$have" "${#img_urls[@]}"
+}
+
 # HTML table start
 echo "<table>" >> "$HTML_TEMP"
 
@@ -248,6 +336,7 @@ for json_file in "${json_files[@]}"; do
     printf "${BLUE}Model %s — %s:${NC}\n" "$model_id" "$model_name"
     echo "model_${model_id} | \"${model_name}\":" >> "$TEMP_FILE"
     echo "<tr><td colspan='2' class='model-header'>Model ${model_id} — ${model_name_html}</td></tr>" >> "$HTML_TEMP"
+    [[ $IMAGES -eq 1 ]] && do_images "$json_file" "$model_dir" "$model_id"
 
     # Only entries that have both a filename and a download URL
     mapfile -t entries < <(jq -r '(.files.items // [])[]
@@ -457,7 +546,12 @@ fi
 echo -e " Missing files:          ${RED}${total_missing}${NC}"
 echo -e " Models with no files:   ${YELLOW}${no_file_models}${NC}"
 echo -e " Invalid JSON files:     ${YELLOW}${invalid_json}${NC}"
+if [[ $IMAGES -eq 1 ]]; then
+echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed"
+fi
 echo -e "${YELLOW}================================================${NC}"
+[[ -n "$images_stopped" ]] && echo -e "${YELLOW}Image downloads stopped early: ${images_stopped}${NC}"
+(( images_failed > 0 )) && echo -e "${RED}Image failures saved to:${NC} ${YELLOW}${IMAGES_FAILED_FILE}${NC}"
 [[ -n "$stop_reason" ]] && echo -e "${YELLOW}Downloads stopped early: ${stop_reason}${NC}"
 [[ $total_missing -gt 0 ]] && echo -e "${RED}Missing download URLs saved to:${NC} ${YELLOW}${OUTPUT_FILE}${NC}"
 [[ $DOWNLOAD_MISSING -eq 1 && $download_failed -gt 0 ]] && echo -e "${RED}Failure details saved to:${NC} ${YELLOW}${FAILED_FILE}${NC}"

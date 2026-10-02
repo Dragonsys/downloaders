@@ -158,7 +158,7 @@ resolve_link() {
             FILE_URL="$loc"
             # Filename from the file link: strip the query and Kajabi's id prefix ("<uuid>_")
             local base="${loc%%\?*}"; base="${base##*/}"
-            base="$(printf '%b' "${base//%/\\x}")"
+            base="$(printf '%b' "${base//'%'/'\x'}")"   # quoted: bash 5.2 treats \ in the replacement differently
             FILE_NAME="$(printf '%s' "$base" | sed -E 's/^[0-9a-fA-F]{6,}(-[0-9a-fA-F]{2,})+_//')"
             return 0
         fi
@@ -190,7 +190,7 @@ fetch_file() {
         rc=$?; code="${result%% *}"; ctype="${result#* }"; [[ "$ctype" == "$result" ]] && ctype=""
         CD_NAME=$(grep -i '^content-disposition:' "$hdr" | tail -1 | tr -d '\r' |
             sed -nE "s/.*filename\*=(UTF-8|utf-8)''([^;]+).*/\2/p; t; s/.*filename=\"?([^\";]+)\"?.*/\1/p")
-        [[ "$CD_NAME" == *%* ]] && CD_NAME="$(printf '%b' "${CD_NAME//%/\\x}")"
+        [[ "$CD_NAME" == *%* ]] && CD_NAME="$(printf '%b' "${CD_NAME//'%'/'\x'}")"
         LAST_ERROR="curl exit $rc, HTTP ${code:-none}$( [[ -s "$errf" ]] && printf ', %s' "$(head -c 150 "$errf" | tr '\n' ' ')")"
         rm -f "$hdr" "$errf"
 

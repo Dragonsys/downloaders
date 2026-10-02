@@ -139,6 +139,17 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 
 (`DOWNLOAD_MISSING` is `0` because MyMiniFactory blocks script downloads. If that ever changes, setting it to `1` makes this script download the files itself, throttled, using `cookie.txt`/`user_agent.txt`.)
 
+**Images:** unlike the files, MyMiniFactory lets scripts download the models' pictures, so this script downloads them itself (without your cookie) into `models/model_<id>/Images/`, named like on the site (`MMM_Caterpillar-13 copy.jpg`). Pictures already there are skipped, so later runs only fetch new ones. Settings at the top of the script:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `IMAGES` | `1` | `0` = don't download pictures |
+| `IMAGE_SIZE` | `"large"` | `"large"` = 1000×1000 (~150 KB), `"standard"` = 720×720, `"original"` = full size (often 1 MB or more each - for thousands of models that's a lot of disk space) |
+| `IMAGE_DELAY_SECONDS` | `0.5` | Pause between pictures |
+| `MAX_IMAGE_DOWNLOADS` | `0` (no limit) | Stop after this many pictures per run |
+
+The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Private models get their pictures too (`2_mmf_private_models.js` includes them in `private_models.json`).
+
 ### Step 4 - Download the missing files (browser, Windows)
 
 1. Open `missing_downloads.txt` from your MyMiniFactory folder on your PC (copy it over if Windows can't see that folder).
