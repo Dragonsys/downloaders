@@ -13,6 +13,7 @@ Layout: `<collection>/<cover>.jpg`, `<collection>/<post>/<files>`, `<collection>
 | `browser/2_hi_export_list.js` | Browser Console | Copies the saved list to the clipboard |
 | `linux/3_hi_download.sh` | Linux | Downloads every file that isn't downloaded yet, using your cookie |
 | `browser/99_hi_reset.js` | Browser Console | Forgets everything collected (only to start fresh) |
+| `linux/99_hi_extract_all.sh` | Linux | Optional: extracts every downloaded archive into its own folder (see below) |
 
 ## Step 1 - Collect the download links (browser)
 
@@ -91,6 +92,24 @@ If two different downloads in one folder have the same filename, the second is k
 ## New collections later
 
 Run the collector again (Step 1) - it only reads new collections - then export (Step 2) and run the downloader (Step 4). Everything already downloaded is skipped.
+
+## Optional: extract the archives (Linux)
+
+Copy `linux/99_hi_extract_all.sh` next to the downloader and run it:
+
+```bash
+cd /mnt/nas/3DPrints/HeroesInfinite
+bash 99_hi_extract_all.sh
+```
+
+It extracts every `.zip` in your Heroes Infinite folder (and `.rar` / `.7z` if `unrar` or `7zip` is installed: `sudo apt install unrar 7zip`) into its own `<archive name>_extracted` folder next to it, so files from different archives never overwrite each other. Archives that are already extracted are skipped, so you can run it after every download round. Extraction happens in a temporary `..._extracted.part` folder first, so an interrupted run never leaves a half-filled folder.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `HI_DIR` | empty (the script's folder) | Where the Heroes Infinite files are (same as in `3_hi_download.sh`) |
+| `DELETE_AFTER_EXTRACT` | `0` | `1` = delete each archive once it's extracted successfully. Safe for Heroes Infinite: the downloader remembers what it downloaded (see below) |
+
+Damaged archives are kept and listed in `hi_failed_archives.txt`; they're tried again on the next run.
 
 ## Deleting the files after extracting
 
