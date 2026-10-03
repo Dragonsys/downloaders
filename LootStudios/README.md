@@ -24,8 +24,9 @@ It works in two halves:
 | `browser/2_loot_export_list.js` | Browser Console | Copies the collected list to the clipboard |
 | `linux/3_loot_download_all_bundles.sh` | Linux | Checks what's already downloaded and downloads what's missing |
 | `browser/99_loot_reset.js` | Browser Console | Forgets everything collected (only if you want to start fresh) |
-| `linux/99_loot_extract_all.sh` | Linux | Optional: extracts the zips and sorts them into `<group>/<model>-<type>/<scale>/` folders (see below) |
-| `linux/99_loot_fix_folders.sh` | Linux | One-off: moves newer bundles out of the `Fantasy/` folder older versions put them in (see below) |
+| `linux/99_loot_extract_all.sh` | Linux | Optional: extracts the zips and sorts them into `<group>/<model>/images/` and `<group>/<model>/files/<scale>/<type>/`, FDM files into `<model>-FDM` (see below) |
+| `linux/99_loot_fix_extracted.sh` | Linux | One-off: re-sorts models extracted by earlier versions of the extract script into the current layout, pictures included (see below) |
+| `linux/99_loot_fix_folders.sh` | Linux | Moves downloads that ended up outside their bundle's folder (e.g. in `Fantasy/` or `FreeMini/`) into it (see below) |
 
 ---
 
@@ -174,26 +175,37 @@ A Loot Studios zip holds a whole bundle at one scale, in folders like `All_Shado
 ```
 ShadowCourt/
 ├── Enemies/
-│   ├── images/                         pictures of the Enemies (each kept once)
-│   ├── DeathGiant-lychee/
-│   │   ├── 32mm/                       from All_ShadowCourt_32mm.zip
-│   │   ├── 75mm/                       from All_ShadowCourt_75mm.zip
-│   │   └── bust/                       from All_ShadowCourt_Bust.zip
-│   ├── DeathGiant-supported/
-│   │   ├── 32mm/  75mm/  bust/
-│   ├── DeathGiant-unsupported/ ...
-│   └── DeathGiant-3mf/32mm/            from ShadowCourt_All_FDM.zip
+│   ├── DeathGiant/
+│   │   ├── images/                     the model's pictures (each kept once)
+│   │   └── files/
+│   │       ├── 32mm/                   from All_ShadowCourt_32mm.zip
+│   │       │   ├── lychee/
+│   │       │   ├── supported/
+│   │       │   └── unsupported/
+│   │       ├── 75mm/                   from All_ShadowCourt_75mm.zip
+│   │       │   └── lychee/  supported/  unsupported/
+│   │       └── bust/                   from All_ShadowCourt_Bust.zip
+│   │           └── lychee/  supported/  unsupported/
+│   └── DeathGiant-FDM/                 from ShadowCourt_All_FDM.zip
+│       ├── images/
+│       └── files/
+│           └── 32mm/
+│               ├── 3mf/
+│               └── unsupported/
 ├── Heroes/ ...
 ├── Environment/ ...
 └── Prop/
-    └── RoyalSeal-lychee/prop/
+    └── RoyalSeal/
+        ├── images/
+        └── files/prop/lychee/
 ```
 
-- **Type** (from the end of the model's folder name): `LYCHEE` / `Supported_LYCHEE` / `Supported_SLICER` → `lychee`, `ReadyToSlice` / `Supported` → `supported`, `Supported_Hollow` → `hollow`, `Supported_Solid` → `solid` (older bundles have both), `UnSupported` / `NoSupports` → `unsupported`, `Supported_CHITUBOX` → `chitubox`, `FDM` → `fdm`, `3mf` → `3mf`. Typos seen in real zips (`LYHCEE`, `UnSuppoted`, `ReadyToSlicer` ...) are understood.
+- **Type** (from the end of the model's folder name): `LYCHEE` / `Supported_LYCHEE` / `Supported_SLICER` → `lychee`, `ReadyToSlice` / `Supported` → `supported`, `Supported_Hollow` → `hollow`, `Supported_Solid` → `solid` (older bundles have both), `UnSupported` / `NoSupports` → `unsupported`, `Supported_CHITUBOX` → `chitubox`, `3mf` → `3mf`. Typos seen in real zips (`LYHCEE`, `UnSuppoted`, `ReadyToSlicer` ...) are understood.
+- **FDM** files get their own model folder, `<Model>-FDM/` (with its own `images/` and `files/<scale>/<type>/`): `3mf` files, Loot's FDM STLs (`..._FDM`, which go to `unsupported`), and everything from a zip or folder with "FDM" in its name (`ShadowCourt_All_FDM.zip`) or that the downloader fetched as FDM.
 - **Scale**: `32mm`, `75mm`, `bust`, `prop` ... from the folder names, or else the zip's name.
 - **Group** (`Heroes`, `Enemies`, `Environment`, `Prop`, `NPCs` ...) from the folders above the model, in every spelling Loot has used (`1-Heroes`, `All_Enemies_CelticDawn_32mm`, `All_75mm_Heroes_Supported_Solid` ...). `Prop`/`Props` or `Enviroment`/`Environment` end up in one folder. **Busts** usually come without a group: a bust goes to the group its model has in the bundle's other zips, otherwise to `Busts/`. Single-figure downloads use the group folder the downloader put them in.
-- **Pictures** in the zips go to the group's `images/`; the downloader's `Images/<group>/` pictures move there too (`MOVE_IMAGES=1`).
-- Models made of parts in subfolders keep them (`Megalodon-lychee/32mm/SharkTail/`). Zips inside zips are extracted too.
+- **Pictures** in the zips go to their model's `images/`. The downloader's pictures (`Images/<group>/`) move there too, matched by name: `Bell Head - render resin.png` → `BellHead/images/`, a `... – Bust` picture to the same model, `... fdm` pictures to `<Model>-FDM/images/` if there is one (`MOVE_IMAGES=1`). Pictures that match no model go to `<group>/images/`.
+- Models made of parts in subfolders keep them (`Megalodon/files/32mm/lychee/SharkTail/`). Zips inside zips are extracted too.
 - `Thumbs.db`, `desktop.ini` and Loot's "Read me" notes are left out (`KEEP_READMES=1` keeps the notes).
 - Zips without model folders (statblocks, GM screen, tools) are extracted into `<bundle>/<zip name>/`, as they are.
 - Nothing is ever overwritten. If a different file with the same name is already there, the new one goes to `<bundle>/<zip name>/` instead, and the zip isn't deleted. What was extracted is remembered in `.loot_extracted.tsv`, so each zip is extracted only once - even after you've deleted it.
@@ -204,20 +216,45 @@ It starts as a **dry run**: it only reads the zips' tables of contents (quick, e
 |---|---|---|
 | `LOOT_DIR` | empty (the script's folder) | Where the bundles are (same as in `3_loot_download_all_bundles.sh`) |
 | `BUSTS_GROUP` | `"Busts"` | Group folder for busts whose model isn't in another group of the bundle |
-| `MOVE_IMAGES` | `1` | `0` = leave the downloader's `Images/` folder alone |
+| `MOVE_IMAGES` | `1` | `0` = leave the downloader's `Images/` folder alone (otherwise its pictures move to their model's `images/`) |
 | `KEEP_READMES` | `0` | `1` = keep Loot's "... - Read me.txt" notes |
 | `DELETE_AFTER_EXTRACT` | `0` | `1` = delete each zip once it's extracted completely. Safe: the downloader remembers what it downloaded (see above) |
 | `DRY_RUN` | `1` | `0` = actually extract, sort and delete |
+
+### Already extracted with an earlier version?
+
+Earlier versions of the script used other layouts. `linux/99_loot_fix_extracted.sh` moves what they made into the current one - no zips needed, it works on the extracted folders:
+
+| Earlier | Now |
+|---|---|
+| `DeathGiant-lychee/32mm/` (also `-supported`, `-hollow`, `-solid`, `-chitubox`, `-unsupported`) | `DeathGiant/files/32mm/lychee/` |
+| `DeathGiant-3mf/32mm/` | `DeathGiant-FDM/files/32mm/3mf/` |
+| `DeathGiant-fdm/32mm/` | `DeathGiant-FDM/files/32mm/unsupported/` |
+| FDM files in `DeathGiant-unsupported/32mm/` (`..._FDM.stl`, from the FDM zips) | `DeathGiant-FDM/files/32mm/unsupported/` |
+| `DeathGiant/32mm/lychee/` | `DeathGiant/files/32mm/lychee/` |
+| pictures in `<group>/images/` and the downloader's `Images/<group>/` | `DeathGiant/images/` (matched by name, as above); pictures that match no model stay in / go to `<group>/images/` |
+
+```bash
+cd /mnt/nas/3DPrints/LootStudios
+bash 99_loot_fix_extracted.sh
+```
+
+It starts as a **dry run** and lists every folder it would move; set `DRY_RUN=0` and run it again to move them. Nothing is overwritten: a file whose new place already holds a different file with the same name stays where it is and is listed in `loot_fix_extracted_problems.txt`. Running it again is harmless. (Two FDM files in Rise of Draconians - Izatal's wings - don't have "FDM" in their name, so they stay with the resin `unsupported` files.)
 
 Damaged zips are kept and listed in `loot_failed_archives.txt`; they're tried again on the next run. Your model manager may want a different layout - the folder names come from a few rules near the top of the script (`TYPE_RULES`), easy to change.
 
 ---
 
-## One-off: fix the folders of newer bundles
+## Fix the folders: downloads outside their bundle's folder
 
-Newer bundles have download links like `new-dls.loot-studios.com/Fantasy/ShadowCourt/...`. Older versions of the downloader named the folder after the first part, so the All Bundle archives of **all** newer bundles ended up together in one `Fantasy` folder (or `SciFi`, ...). Current versions use the bundle's own folder (`ShadowCourt`). To move the files you already have:
+A bundle's folder is named after its download links, and Loot Studios has changed those over time. So some files can end up outside their bundle's own folder:
 
-1. Collect and export as usual (Step 1-2), so `loot_all_bundles.tsv` lists your bundles (any version of the list works - only the download links are used).
+- Older versions of the downloader named newer bundles' folder after the first part of `new-dls.loot-studios.com/Fantasy/ShadowCourt/...`, so the All Bundle archives of **all** newer bundles ended up together in one `Fantasy` folder (or `SciFi`, ...).
+- Some bundles moved from `old-dls.loot-studios.com/FreeMini/...` to their own link folder. Files downloaded before that are in `FreeMini/` (e.g. `FreeMini/All_AedanValiantShield_32mm.zip`), while everything downloaded later - the pictures, say - is in `AedanValiantShield/`. The downloader remembers the zips as downloaded, so it doesn't fetch them again and nothing is reported.
+
+`99_loot_fix_folders.sh` compares, for every file in your list, where `.loot_downloaded.tsv` says it is with where the downloader puts it now, and moves what's in the wrong place:
+
+1. Collect and export as usual (Step 1-2), so `loot_all_bundles.tsv` lists your bundles.
 2. Copy `linux/99_loot_fix_folders.sh` next to the downloader and run it:
 
    ```bash
@@ -225,10 +262,10 @@ Newer bundles have download links like `new-dls.loot-studios.com/Fantasy/ShadowC
    bash 99_loot_fix_folders.sh
    ```
 
-   It starts as a **dry run** and only shows what it would move (`Fantasy/All_ShadowCourt_32mm.zip => ShadowCourt/All_ShadowCourt_32mm.zip`).
-3. If that looks right, open the script, set `DRY_RUN=0`, and run it again. It moves the files, updates their paths in `.loot_downloaded.tsv` (the old one is kept as `.loot_downloaded.tsv.bak`), and removes the old folder once it's empty.
+   It starts as a **dry run** and only shows what it would move (`FreeMini/All_AedanValiantShield_32mm.zip => AedanValiantShield/All_AedanValiantShield_32mm.zip`).
+3. If that looks right, open the script, set `DRY_RUN=0`, and run it again. It moves the files, updates their paths in `.loot_downloaded.tsv` (the old one is kept as `.loot_downloaded.tsv.bak`), and removes old folders once they're empty.
 
-Files you've already extracted and deleted are only updated in `.loot_downloaded.tsv`. If two newer bundles have an archive with the **same name** (e.g. `All_32mm.zip`), they overwrote each other in the shared folder; the script leaves that file alone and lists it - delete it and its lines in `.loot_downloaded.tsv` to download both again. Running the script again is harmless.
+Files you've already extracted and deleted are only updated in `.loot_downloaded.tsv`. If two bundles have an archive with the **same name** (e.g. `All_32mm.zip`) in a shared folder, they overwrote each other; the script leaves that file alone and lists it - delete it and its lines in `.loot_downloaded.tsv` to download both again. Running the script again is harmless.
 
 ---
 

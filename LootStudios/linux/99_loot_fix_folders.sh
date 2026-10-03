@@ -1,14 +1,17 @@
 #!/bin/bash
 # ================================================================
-# Loot Studios - fix the folders of bundles downloaded by older versions
+# Loot Studios - move downloads that ended up outside their bundle's folder
 #
-# Newer bundles have links like  new-dls.loot-studios.com/Fantasy/ShadowCourt/Resin/...
-# Older versions of 3_loot_download_all_bundles.sh named the folder after the
-# first part ("Fantasy"), so the All Bundle archives of every newer bundle ended
-# up together in LOOT_DIR/Fantasy/ (or SciFi/, ...). This script moves them to
-# the bundle's own folder (LOOT_DIR/ShadowCourt/) and updates the paths in
-# LOOT_DIR/.loot_downloaded.tsv. Files you've already deleted are only updated
-# in that record.
+# A bundle's folder is named after its download links, and those have changed over time:
+#  - Older versions of 3_loot_download_all_bundles.sh named newer bundles' folder after the
+#    first part of new-dls.loot-studios.com/Fantasy/ShadowCourt/... ("Fantasy"), so their All
+#    Bundle archives ended up together in LOOT_DIR/Fantasy/ (or SciFi/, ...).
+#  - Some bundles moved from old-dls.loot-studios.com/FreeMini/... to .../AedanValiantShield/...,
+#    so files downloaded earlier are in LOOT_DIR/FreeMini/ and newer ones (e.g. the pictures)
+#    in LOOT_DIR/AedanValiantShield/.
+# This script compares, for every file in the list, where .loot_downloaded.tsv says it is with
+# where the downloader puts it now, moves it into the bundle's own folder, and updates the
+# paths in .loot_downloaded.tsv. Files you've already deleted are only updated in that record.
 #
 # It needs the exported list (loot_all_bundles.tsv, any version) to know which
 # file belongs to which bundle. Run with DRY_RUN=1 first to see what it would do.
@@ -66,23 +69,64 @@ for c in file url; do
     [[ -n "${col[$c]}" ]] || { echo -e "${RED}The list has no '$c' column.${NC}"; exit 1; }
 done
 
-# old path (relative to LOOT_DIR) -> new path, for every newer-bundle archive in the list
+# What the record says was downloaded where (key -> path relative to LOOT_DIR)
+declare -A recorded=()
+if [[ -f "$LEDGER" ]]; then
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        l="${l%$'\r'}"
+        IFS=$'\x1f' read -r lkey lpath _ <<< "${l//$'\t'/$'\x1f'}"
+        [[ -n "$lkey" && -n "$lpath" && "$lpath" != "("* ]] && recorded[$lkey]="$lpath"
+    done < "$LEDGER"
+fi
+
+# old path (relative to LOOT_DIR) -> new path: every file in the list that the record (or an
+# older version's folder naming) puts somewhere else than the downloader would put it now
 declare -A target=() conflict=()
+add_target() {   # add_target OLD NEW
+    [[ -n "$1" && -n "$2" && "$1" != "$2" ]] || return
+    if [[ -n "${target[$1]}" && "${target[$1]}" != "$2" ]]; then conflict[$1]=1; fi
+    target[$1]="$2"
+}
 for (( n = 1; n < ${#lines[@]}; n++ )); do
     IFS=$'\x1f' read -r -a f <<< "${lines[$n]//$'\t'/$'\x1f'}"
     url="${f[${col[url]}]}"; file="${f[${col[file]}]}"
+    [[ -n "$file" ]] || continue
     kind="${f[${col[kind]:-99}]}"; [[ -z "$kind" ]] && kind="all"
-    [[ "$kind" == "all" && -n "$file" && "$url" =~ ^https?://new-dls\.[^/]+/([^/?]+)/([^/?]+)/[^?]*/ ]] || continue
-    old_dir="$(safe_name "$(urldecode "${BASH_REMATCH[1]}")")"
-    new_dir="$(safe_name "$(urldecode "${BASH_REMATCH[2]}")")"
-    [[ -n "$old_dir" && -n "$new_dir" && "$old_dir" != "$new_dir" ]] || continue
-    old="$old_dir/$(safe_name "$file")"; new="$new_dir/$(safe_name "$file")"
-    if [[ -n "${target[$old]}" && "${target[$old]}" != "$new" ]]; then conflict[$old]=1; fi
-    target[$old]="$new"
+    bundle="${f[${col[bundle]:-99}]}"; folder="${f[${col[folder]:-99}]}"
+    scale="${f[${col[scale]:-99}]}"; material="${f[${col[material]:-99}]}"
+    page="${f[${col[page]:-99}]}"; group="${f[${col[group]:-99}]}"
+    # Where 3_loot_download_all_bundles.sh puts it (same rules, ORGANIZE="folder")
+    if [[ -n "$folder" ]]; then dir="$(safe_name "$folder")"; else dir="$(safe_name "$bundle")"; fi
+    [[ -z "$dir" ]] && dir="Unknown bundle"
+    inner="$(safe_name "$file")"
+    if [[ "$kind" == "item" ]]; then sub="$(safe_name "$group")"; inner="${sub:-Figures}/$inner"; fi
+    if [[ "$kind" == "image" ]]; then sub="$(safe_name "$group")"; inner="Images/${sub:-Figures}/$inner"; fi
+    new="$dir/$inner"
+    # 1. The record says it's somewhere else (e.g. FreeMini/ - the folder of an older link)
+    key="${page:-$bundle}|$scale|$material|$file"
+    # pictures: the downloader adds the group to the key (older versions didn't)
+    [[ "$kind" == "image" && -n "${recorded[$key|$group]}" ]] && key="$key|$group"
+    if [[ -n "${recorded[$key]}" ]]; then
+        rec="${recorded[$key]}"
+        if [[ "$kind" == "image" ]]; then
+            # A figure and its bust often have the same name, so their pictures share one record
+            # line; which group folder is right can't be told - only fix the bundle folder.
+            [[ "${rec%%/*}" == "${new%%/*}" ]] && continue
+            # a picture renamed to its real extension (.jpg that was a PNG) keeps that extension
+            [[ "${rec##*.}" != "${new##*.}" ]] && new="${new%.*}.${rec##*.}"
+        fi
+        add_target "$rec" "$new"
+        continue
+    fi
+    # 2. Not recorded: older versions named newer bundles' folder after the link's first part
+    #    (new-dls.loot-studios.com/Fantasy/ShadowCourt/... -> "Fantasy")
+    if [[ "$kind" == "all" && "$url" =~ ^https?://new-dls\.[^/]+/([^/?]+)/[^?]*/ ]]; then
+        add_target "$(safe_name "$(urldecode "${BASH_REMATCH[1]}")")/$(safe_name "$file")" "$new"
+    fi
 done
 
 if (( ${#target[@]} == 0 )); then
-    echo -e "${GREEN}No newer bundles in the list - nothing to fix.${NC}"
+    echo -e "${GREEN}Everything is in its bundle's folder already - nothing to fix.${NC}"
     exit 0
 fi
 
@@ -127,7 +171,7 @@ done
 # ---------- update the record of downloaded files ----------
 updated=0
 if [[ -f "$LEDGER" && ${#remap[@]} -gt 0 ]]; then
-    tmp="$LEDGER.tmp"; : > "$tmp"
+    tmp="$LEDGER.tmp"; (( DRY_RUN )) && tmp=/dev/null || : > "$tmp"   # dry run: only count
     while IFS= read -r l || [[ -n "$l" ]]; do
         l="${l%$'\r'}"
         IFS=$'\x1f' read -r lkey lpath ldate <<< "${l//$'\t'/$'\x1f'}"
@@ -137,8 +181,7 @@ if [[ -f "$LEDGER" && ${#remap[@]} -gt 0 ]]; then
         fi
         printf '%s\n' "$l" >> "$tmp"
     done < "$LEDGER"
-    if (( DRY_RUN )); then rm -f "$tmp"
-    else cp -p "$LEDGER" "$LEDGER.bak" && mv -f "$tmp" "$LEDGER"; fi
+    (( DRY_RUN )) || { cp -p "$LEDGER" "$LEDGER.bak" && mv -f "$tmp" "$LEDGER"; }
 fi
 
 # Remove old category folders that are now empty

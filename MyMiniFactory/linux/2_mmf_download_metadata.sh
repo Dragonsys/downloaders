@@ -28,6 +28,8 @@ USER_AGENT=''
 USER_AGENT_FILE="user_agent.txt"
 
 DELAY_SECONDS=3
+REFRESH_EXISTING=0   # 0 = skip models whose model_<id>.json is already there (and valid),
+                     # 1 = download every model's metadata again
 
 # Models to leave out: one ID per line ("# ..." = comment), in the current folder or next to
 # this script. Also used by 3_mmf_check_and_download.sh.
@@ -135,6 +137,18 @@ ok=0
 fail=0
 from_library=0
 not_public=0
+existing=0
+requested=0
+
+# have_metadata FILE - 0 if FILE is real model metadata (has a file list), not an error page
+have_metadata() {
+    [[ -s "$1" ]] || return 1
+    if command -v jq &>/dev/null; then
+        jq -e 'type == "object" and has("files")' "$1" &>/dev/null
+    else
+        [[ "$(head -c 1 "$1")" == "{" ]] && grep -q '"files"' "$1"
+    fi
+}
 
 # Write model_<id>.json from private_models.json. Returns 0 if it had a file list for this ID.
 from_private_file() {
@@ -148,6 +162,13 @@ for id in "${ids[@]}"; do
     current=$((current + 1))
     echo -e "${BLUE}[$current/$total] Model $id...${NC}"
 
+    # Already downloaded (and real metadata, not a saved error page)? Then don't ask again.
+    if (( ! REFRESH_EXISTING )) && have_metadata "model_${id}.json"; then
+        echo -e "${GREEN}  already there${NC}"
+        existing=$((existing + 1))
+        continue
+    fi
+
     # Already in private_models.json: no need to ask the API (it would answer 404)
     if from_private_file "$id"; then
         rm -f "error_${id}.txt"
@@ -156,22 +177,29 @@ for id in "${ids[@]}"; do
         continue
     fi
 
+    # Throttle: the pause comes before each request (skipped models don't wait)
+    (( requested )) && sleep "$DELAY_SECONDS"
+    requested=1
+
     # Note: no hand-written Accept-Encoding header. --compressed requests only
     # the encodings this curl build can decode (many Windows builds lack br/zstd).
+    # Saved to a temporary file first, so a failed request never replaces good metadata.
     http_code=$(curl --silent --show-error --location --compressed \
         -H "User-Agent: $USER_AGENT" \
         -H "Accept: application/json" \
         -H "Accept-Language: en-US,en;q=0.5" \
         -H "Referer: https://www.myminifactory.com/api-doc/index.html" \
         -H "Cookie: $COOKIE" \
-        -o "model_${id}.json" \
+        -o "model_${id}.json.tmp" \
         -w "%{http_code}" \
         "https://www.myminifactory.com/api/v2/objects/$id")
     curl_exit=$?
 
-    first_char=$(head -c 1 "model_${id}.json" 2>/dev/null)
+    first_char=$(head -c 1 "model_${id}.json.tmp" 2>/dev/null)
 
     if [[ $curl_exit -eq 0 && "$http_code" == "200" && "$first_char" == "{" ]]; then
+        mv -f "model_${id}.json.tmp" "model_${id}.json"
+        rm -f "error_${id}.txt"
         echo -e "${GREEN}  OK${NC}"
         ok=$((ok + 1))
     else
@@ -181,28 +209,24 @@ for id in "${ids[@]}"; do
             # The usual reason: the model is private now (or was removed) - see private_models.json
             not_public=$((not_public + 1))
             echo -e "${RED}  FAILED (HTTP 404 - private or removed model)${NC}"
-            mv -f "model_${id}.json" "error_${id}.txt" 2>/dev/null
-            if (( current < total )); then sleep "$DELAY_SECONDS"; fi
+            mv -f "model_${id}.json.tmp" "error_${id}.txt" 2>/dev/null
             continue
         fi
         echo -e "${RED}  FAILED (curl exit $curl_exit, HTTP $http_code)${NC}"
-        if [[ -s "model_${id}.json" ]]; then
-            mv "model_${id}.json" "error_${id}.txt"
+        if [[ -s "model_${id}.json.tmp" ]]; then
+            mv "model_${id}.json.tmp" "error_${id}.txt"
             echo "  Response starts with:"
             head -c 200 "error_${id}.txt" | tr -d '\r' | sed 's/^/    /'
             echo ""
         else
-            rm -f "model_${id}.json"
+            rm -f "model_${id}.json.tmp"
         fi
-    fi
-
-    if (( current < total )); then
-        sleep "$DELAY_SECONDS"
     fi
 done
 
 echo ""
-echo -e "${GREEN}Done. $ok succeeded, $fail failed.${NC}"
+echo -e "${GREEN}Done. $ok downloaded, $existing already there, $fail failed.${NC}"
+(( existing > 0 )) && echo "Models whose metadata was already there were skipped (REFRESH_EXISTING=1 downloads them again)."
 (( n_excluded > 0 )) && echo "$n_excluded model(s) left out (listed in $EXCLUDE_FILE)."
 (( from_library > 0 )) && echo "$from_library of them are private models; their file lists came from private_models.json."
 if (( fail > 0 )); then

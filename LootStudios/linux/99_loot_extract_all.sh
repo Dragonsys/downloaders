@@ -8,22 +8,26 @@
 # Every model's folder name says the model, the scale and the type. This script puts each
 # model's files into its bundle folder as
 #
-#   <bundle>/<group>/<Model>-<type>/<scale>/      e.g. ShadowCourt/Enemies/DeathGiant-lychee/32mm/
-#   <bundle>/<group>/images/                      the model pictures (each picture kept once)
+#   <bundle>/<group>/<Model>/images/                    the model's pictures (each kept once)
+#   <bundle>/<group>/<Model>/files/<scale>/<type>/      e.g. ShadowCourt/Enemies/DeathGiant/files/32mm/lychee/
+#   <bundle>/<group>/<Model>-FDM/images/ and files/...  FDM files, e.g. .../DeathGiant-FDM/files/32mm/3mf/
 #
 #   type:  lychee      LYCHEE, Supported_LYCHEE, Supported_SLICER (.lys files)
 #          supported   ReadyToSlice, Supported
 #          hollow      Supported_Hollow          solid  Supported_Solid
-#          unsupported UnSupported, NoSupports   chitubox  Supported_CHITUBOX
-#          fdm         FDM                       3mf    3mf
+#          unsupported UnSupported, NoSupports, and FDM STLs ("..._FDM")
+#          chitubox    Supported_CHITUBOX        3mf    3mf (FDM)
+#   FDM:   3mf and FDM files, zips/folders with "FDM" in the name, or zips the downloader
+#          fetched as FDM go to "<Model>-FDM"
 #   scale: 32mm, 75mm, bust, prop ... (from the folder names or the zip's name)
 #   group: Heroes, Enemies, Environment, Prop ... (from the folders above the model). Busts
 #          usually have no group: they go to the group their model has in the bundle's other
 #          zips, otherwise to "Busts".
-# Parts in subfolders stay in subfolders (Megalodon-lychee/32mm/SharkTail/...). Zips inside
+# Parts in subfolders stay in subfolders (Megalodon/files/32mm/lychee/SharkTail/...). Zips inside
 # zips are extracted too. Thumbs.db / desktop.ini are dropped. Anything that can't be placed
 # keeps its folders in <bundle>/<zip name>/.
-# The pictures the downloader saved in <bundle>/Images/<group>/ move to <bundle>/<group>/images/.
+# The pictures the downloader saved in <bundle>/Images/<group>/ move to their model's images/
+# (matched by name; "... fdm" pictures to <Model>-FDM if it exists); unmatched ones to <group>/images/.
 #
 # Nothing is overwritten. Each zip is extracted in a temporary folder first, so an interrupted
 # run leaves nothing half-done. What was extracted is remembered in LOOT_DIR/.loot_extracted.tsv,
@@ -49,7 +53,7 @@ NC='\033[0m'
 # Empty = the folder this script is in.
 LOOT_DIR=""
 BUSTS_GROUP="Busts"      # group folder for busts whose model isn't in another group of the bundle
-MOVE_IMAGES=1            # 1 = move the downloader's <bundle>/Images/<group>/ to <bundle>/<group>/images/
+MOVE_IMAGES=1            # 1 = move the downloader's pictures (<bundle>/Images/<group>/) to their model's images/
 DELETE_AFTER_EXTRACT=0   # 1 = delete each zip after it was extracted completely
 KEEP_READMES=0           # 1 = keep the "... - Read me.txt" notes Loot puts next to the folders
                          #     (and "There are no files that would go in this folder.txt")
@@ -321,9 +325,12 @@ scan_bundle() {
     local b="$1" a d n
     [[ -n "${BUNDLE_SCANNED[$b]}" ]] && return
     BUNDLE_SCANNED[$b]=1
-    for d in "$LOOT_DIR/$b"/*/*-*/; do
-        n="${d%/}"; n="${n##*/}"; n="${n%-*}"; norm "$n"
+    for d in "$LOOT_DIR/$b"/*/*/; do              # <group>/<Model>[-FDM]/ sorted earlier
+        n="${d%/}"; n="${n##*/}"; n="${n%-FDM}"
+        [[ "${n,,}" == images || "${n,,}" == files ]] && continue
+        norm "$n"
         d="${d%/*/}"; d="${d##*/}"
+        [[ "${d,,}" == images ]] && continue
         [[ -n "$NORM" && -z "${MODEL_GROUP[$b|$NORM]}" ]] && MODEL_GROUP[$b|$NORM]="$d"
     done
     have unzip || return
@@ -343,7 +350,7 @@ scan_bundle() {
 # the files in DIR; TDIR "" = not recognised
 target_dir() {
     local d="$1" arel="$2" b="$3" g
-    TDIR=""; TIMG=""; TMODEL=""
+    TDIR=""; TIMG=""; TMODEL=""; TTYPE=""
     if [[ -z "$d" ]]; then d="${arel##*/}"; d="${d%.*}"; fi     # files at the top: use the zip's name
     classify "$d" "$arel"
     [[ -z "$C_TYPE" ]] && return
@@ -353,8 +360,20 @@ target_dir() {
         [[ -z "$g" && "$C_SCALE" == bust ]] && g="$BUSTS_GROUP"
     fi
     if [[ -n "$g" ]]; then group_dir "$b" "$g"; TDIR="$GDIR/"; TIMG="$GDIR/images"; else TIMG="images"; fi
-    TMODEL="$TDIR$C_MODEL-$C_TYPE${C_SCALE:+/$C_SCALE}"; TDIR="$TMODEL${C_SUB:+/$C_SUB}"
+    # FDM files get their own model folder "<Model>-FDM"; Loot's plain FDM STLs are unsupported
+    local fdm=0 type="$C_TYPE"
+    [[ "$C_TYPE" == fdm || "$C_TYPE" == 3mf ]] && fdm=1
+    [[ "${DL_MATERIAL[/$arel]}" == fdm ]] && fdm=1
+    shopt -s nocasematch
+    [[ "/$d/${arel##*/}" =~ $FDM_RE ]] && fdm=1
+    shopt -u nocasematch
+    [[ "$type" == fdm ]] && type="unsupported"
+    TMODEL="$TDIR$C_MODEL"; (( fdm )) && TMODEL="$TMODEL-FDM"      # the model's folder
+    TTYPE="$TMODEL/files${C_SCALE:+/$C_SCALE}/$type"                  # .../files/32mm/lychee
+    TIMG="$TMODEL/images"                                             # the model's own pictures
+    TDIR="$TTYPE${C_SUB:+/$C_SUB}"
 }
+FDM_RE='(^|[/_ (-])FDM([/_ ).-]|$)'
 
 # ================================================================
 # Moving files
@@ -457,13 +476,14 @@ if [[ -f "$LEDGER" ]]; then
 fi
 record() { (( DRY_RUN )) || printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"; }
 
-# The downloader's record knows each zip's scale ("page|scale|material|file" -> path); used for
-# single-figure zips whose names don't say it (e.g. "DawnkeepGate_FDM.zip")
-declare -A DL_SCALE=()
+# The downloader's record knows each zip's scale and material ("page|scale|material|file" -> path);
+# used for zips whose names don't say it (e.g. "DawnkeepGate_FDM.zip", an FDM "..._3mf.zip")
+declare -A DL_SCALE=() DL_MATERIAL=()
 if [[ -f "$LOOT_DIR/.loot_downloaded.tsv" ]]; then
     while IFS=$'\t' read -r lkey lpath _; do
         [[ "$lpath" == *.zip ]] || continue
-        IFS='|' read -r _ lscale _ <<< "$lkey"
+        IFS='|' read -r _ lscale lmat _ <<< "$lkey"
+        [[ -n "$lmat" ]] && DL_MATERIAL[/$lpath]="${lmat,,}"
         case "${lscale,,}" in ""|all) continue ;; other) lscale=prop ;; esac
         DL_SCALE[/$lpath]="${lscale,,}"
     done < <(tr -d '\r' < "$LOOT_DIR/.loot_downloaded.tsv")
@@ -502,14 +522,14 @@ for a in "${archives[@]}"; do
         for d in "${ZDIRS[@]}"; do
             target_dir "$d" "$ar" "$bundle"
             if [[ -n "$TDIR" ]]; then
-                tdirs["$TMODEL"]=1
+                tdirs["$TTYPE"]=1
                 printf '%s\t%s\t%s\n' "$ar" "$d" "$bundle/$TDIR" >> "$PLAN_FILE"
             else
                 unplaced=$((unplaced + 1))
                 printf '%s\t%s\t%s\n' "$ar" "$d" "$bundle/$base/  (not recognised)" >> "$PLAN_FILE"
             fi
         done
-        printf "  ${BLUE}->${NC} %s: %s model folder(s)%s\n" "$label" "${#tdirs[@]}" \
+        printf "  ${BLUE}->${NC} %s: %s folder(s) (model/scale/type)%s\n" "$label" "${#tdirs[@]}" \
             "$( (( unplaced )) && printf ", ${YELLOW}%s folder(s) not recognised -> %s/%s/${NC}" "$unplaced" "$bundle" "$base")"
         i=0; while IFS= read -r t; do
             (( i++ < SHOW_FOLDERS )) || break; printf "       %s/%s\n" "$bundle" "$t"
@@ -564,16 +584,57 @@ for a in "${archives[@]}"; do
     fi
 done
 
-# ---------- the downloader's pictures: <bundle>/Images/<group>/ -> <bundle>/<group>/images/ ----------
-img_moves=0
+# ---------- the downloader's pictures: <bundle>/Images/<group>/ -> <Model>/images/ ----------
+# model_index BUNDLE - MODEL_AT[<normalized name>] = "<group>/<Model>|..." for the bundle's model
+# folders (folders holding "files/")
+declare -A MODEL_AT=()
+model_index() {
+    local d n
+    MODEL_AT=()
+    for d in "$LOOT_DIR/$1"/*/files/ "$LOOT_DIR/$1"/*/*/files/; do
+        d="${d%/files/}"; d="${d#"$LOOT_DIR/$1/"}"; n="${d##*/}"; norm "$n"
+        MODEL_AT[$NORM]="${MODEL_AT[$NORM]:+${MODEL_AT[$NORM]}|}$d"
+    done
+}
+# picture_model FILE GROUP - sets PM to the model folder (relative to the bundle) a picture
+# belongs to, or "": "Bell Head - render resin.png" -> Enemies/BellHead, "... - painted fdm.jpg"
+# -> <Model>-FDM if there is one, "Aedan, Valiant Shield &#8211; Bust - ..." -> the model's
+# folder, "AwynArcaneInvestigator.png" (from a zip) -> AwynArcaneInvestigator
+picture_model() {
+    local s="${1##*/}" g="$2" mat="" k c cands cand gk
+    PM=""
+    s="${s%.*}"
+    while [[ "$s" =~ ^(.*)\&#[0-9]+\;(.*)$ ]]; do s="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"; done
+    if [[ "$s" =~ ^(.+)[[:space:]]-[[:space:]](render|painted)[[:space:]](resin|fdm)$ ]]; then s="${BASH_REMATCH[1]}"; mat="${BASH_REMATCH[3]}"; fi
+    [[ "$s" =~ ^(.+)_[0-9]+$ ]] && s="${BASH_REMATCH[1]}"            # "Name_2.png"
+    norm "$s"; k="$NORM"
+    [[ -n "$k" ]] || return
+    cands="$k"; [[ "$k" == *bust ]] && cands+=" ${k%bust}"
+    [[ "$mat" == fdm ]] && { local fc=""; for c in $cands; do fc+="${c}fdm "; done; cands="$fc$cands"; }
+    group_key "$g"; gk="$GKEY"
+    for c in $cands; do
+        [[ -n "${MODEL_AT[$c]}" ]] || continue
+        if [[ "${MODEL_AT[$c]}" != *"|"* ]]; then PM="${MODEL_AT[$c]}"; return; fi
+        # the same name in several groups: the one in the picture's group
+        IFS='|' read -r -a cand <<< "${MODEL_AT[$c]}"
+        for c in "${cand[@]}"; do group_key "${c%%/*}"; [[ "$GKEY" == "$gk" ]] && { PM="$c"; return; }; done
+        return
+    done
+}
+
+img_moves=0; img_to_model=0
 if (( MOVE_IMAGES )); then
     for idir in "$LOOT_DIR"/*/Images/; do
         idir="${idir%/}"; b="${idir%/Images}"; b="${b##*/}"
+        model_index "$b"
         for f in "$idir"/*/*; do
             [[ -f "$f" ]] || continue
-            g="${f%/*}"; g="${g##*/}"; group_dir "$b" "$g"
+            g="${f%/*}"; g="${g##*/}"
+            picture_model "$f" "$g"
+            if [[ -n "$PM" ]]; then dst="$PM/images"; img_to_model=$((img_to_model + 1))
+            else group_dir "$b" "$g"; dst="$GDIR/images"; fi
             if (( DRY_RUN )); then img_moves=$((img_moves + 1)); continue; fi
-            place_image "$f" "$LOOT_DIR/$b/$GDIR/images" && img_moves=$((img_moves + 1))
+            place_image "$f" "$LOOT_DIR/$b/$dst" && img_moves=$((img_moves + 1))
         done
         (( DRY_RUN )) && continue
         find "$idir" -mindepth 1 -type d -empty -delete 2>/dev/null
@@ -595,7 +656,7 @@ echo -e " $( (( DRY_RUN )) && echo 'Would extract:   ' || echo 'Extracted now:  
 echo -e " Already extracted:      ${already}"
 (( INNER )) && echo -e " Zips inside zips:       ${INNER}"
 (( IMAGES_MOVED )) && echo -e " Pictures to images/:    ${IMAGES_MOVED} (identical copies kept once)"
-(( img_moves )) && echo -e " Downloaded pictures:    ${img_moves} $( (( DRY_RUN )) && echo 'would move' || echo 'moved') from Images/<group>/ to <group>/images/"
+(( img_moves )) && echo -e " Downloaded pictures:    ${img_moves} $( (( DRY_RUN )) && echo 'would move' || echo 'moved') from Images/<group>/: ${img_to_model} to their model's images/, the rest to <group>/images/$( (( DRY_RUN )) && echo ' (models extracted in this run are matched on the real run)')"
 (( leftover_total )) && echo -e " Not recognised:         ${YELLOW}${leftover_total}${NC} $( (( DRY_RUN )) && echo 'folder(s)' || echo 'file(s)') - kept in <bundle>/<zip name>/"
 echo -e " Failed:                 ${RED}${failed}${NC}"
 (( kept_total )) && echo -e " Files kept (a different file with the same name was already there): ${YELLOW}${kept_total}${NC}"

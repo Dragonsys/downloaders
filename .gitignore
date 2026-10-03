@@ -21,6 +21,7 @@ move_problems.txt
 failed_archives.txt
 hi_failed_archives.txt
 loot_failed_archives.txt
+loot_fix_extracted_problems.txt
 rename_log.csv
 private_models.json
 failed_images.txt

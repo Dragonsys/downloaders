@@ -104,7 +104,7 @@ cd /mnt/nas/3DPrints/MyMiniFactory
 bash 2_mmf_download_metadata.sh
 ```
 
-This saves one `downloads/model_<id>.json` per model (3 seconds apart). Failed IDs go to `downloads/failed_ids.txt` with the server's reply in `error_<id>.txt`. To retry only those, copy `downloads/failed_ids.txt` over `model_ids.txt` and run it again.
+This saves one `downloads/model_<id>.json` per model (3 seconds apart). **Models whose metadata is already there are skipped** without asking MyMiniFactory, so after adding new purchases only the new models are fetched (a saved error page doesn't count - that model is tried again). To download everything again (e.g. to pick up files a creator added later), set `REFRESH_EXISTING=1`; if a refresh fails, the metadata you had is kept. Failed IDs go to `downloads/failed_ids.txt` with the server's reply in `error_<id>.txt`. To retry only those, copy `downloads/failed_ids.txt` over `model_ids.txt` and run it again.
 
 | Result | Meaning |
 |---|---|
@@ -113,6 +113,7 @@ This saves one `downloads/model_<id>.json` per model (3 seconds apart). Failed I
 | `FAILED (HTTP 404 - private or removed model)` | Usually a model the creator has made **private** or taken off sale - see below |
 | `OK (private model - file list from private_models.json)` | Its file list came from `private_models.json` (see below) |
 | `HTTP 429` | Too many requests - raise `DELAY_SECONDS` |
+| `already there` | `model_<id>.json` exists - not downloaded again (`REFRESH_EXISTING=1` to refresh) |
 
 #### Private models (HTTP 404)
 

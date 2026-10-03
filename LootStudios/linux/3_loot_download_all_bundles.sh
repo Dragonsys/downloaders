@@ -115,6 +115,16 @@ in_list() {   # in_list "value" "space separated list"  (case-insensitive; empty
     return 1
 }
 
+# The site names some pictures wrongly (a "...-painted-resin.jpg" that is really a PNG).
+# image_real_ext FILE - prints the extension the content shows (png/jpg/webp/gif), or nothing
+image_real_ext() {
+    case "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" in
+        89504e47*) echo png ;; ffd8ff*) echo jpg ;; 52494646*) echo webp ;; 47494638*) echo gif ;;
+    esac
+}
+# with_ext PATH EXT - PATH with its extension replaced by EXT
+with_ext() { printf '%s.%s' "${1%.*}" "$2"; }
+
 # Check a finished archive. Returns 0 = OK, 1 = broken, 2 = not checked.
 verify_archive() {
     local f="$1" magic
@@ -122,6 +132,8 @@ verify_archive() {
     case "${f,,}" in
         *.png) [[ "$magic" == 89504e47* ]] || { LAST_ERROR="not a PNG image"; return 1; } ;;
         *.jpg|*.jpeg) [[ "$magic" == ffd8ff* ]] || { LAST_ERROR="not a JPEG image"; return 1; } ;;
+        *.webp) [[ "$magic" == 52494646* ]] || { LAST_ERROR="not a WebP image"; return 1; } ;;
+        *.gif) [[ "$magic" == 47494638* ]] || { LAST_ERROR="not a GIF image"; return 1; } ;;
         *.pdf) [[ "$magic" == 25504446* ]] || { LAST_ERROR="not a PDF file"; return 1; } ;;
         *.zip)
             [[ "$magic" == 504b0304* || "$magic" == 504b0506* ]] || { LAST_ERROR="not a zip file (got: $(head -c 60 "$f" | tr -cd '[:print:]'))"; return 1; }
@@ -229,6 +241,10 @@ parse_row() {
     page="${f[${col[page]:-99}]}"
     # Stable id for the ledger (the link itself changes every time it is refreshed)
     key="${page:-$bundle}|$scale|$material|$file"
+    # A figure and its bust often have the same name, so their pictures have the same file name
+    # (in different group folders): pictures get the group in their key
+    oldkey="$key"
+    [[ "$kind" == "image" ]] && key="$key|$group"
     link_time=0
     [[ "$url" =~ [?\&]v=([0-9]{9,})- ]] && link_time="${BASH_REMATCH[1]}"
     ROW_OK=1
@@ -260,9 +276,10 @@ mark_unavailable() {   # mark_unavailable KEY REASON
 }
 
 # If the list holds several links for the same file (e.g. an older export), use the newest one
-declare -A best_row=() best_time=()
+declare -A best_row=() best_time=() oldkey_uses=()
 for (( n = 1; n < ${#lines[@]}; n++ )); do
     parse_row "${lines[$n]}"; (( ROW_OK )) || continue
+    [[ "$kind" == "image" && "${oldkey_uses[$oldkey]}" != *"|$group|"* ]] && oldkey_uses[$oldkey]+="|$group|"
     if [[ -z "${best_row[$dest]}" ]] || (( link_time > ${best_time[$dest]} )); then
         best_row[$dest]=$n; best_time[$dest]=$link_time
     fi
@@ -297,6 +314,18 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         *)     label="$bundle - ${scale:+$scale }${material:+$material }($file)" ;;
     esac
 
+    # Pictures recorded by older versions (key without the group): the recorded path's folder
+    # says which group the picture was; only that one counts as downloaded
+    if [[ "$kind" == "image" && -z "${recorded[$key]}" && -n "${recorded[$oldkey]}" ]]; then
+        rp="${recorded[$oldkey]}"; rg="${rp%/*}"; rg="${rg##*/}"; sg="$(safe_name "$group")"
+        [[ "$rg" == "${sg:-Figures}" || "$rp" == "("* ]] && record "$key" "$rp"
+    fi
+    # ... and "not on the site" from older versions, unless two groups share that name
+    if [[ "$kind" == "image" && -z "${unavail_at[$key]}" && -n "${unavail_at[$oldkey]}" \
+          && "${oldkey_uses[$oldkey]}" == "|$group|" ]]; then
+        unavail_at[$key]="${unavail_at[$oldkey]}"
+    fi
+
     # Recorded as downloaded on an earlier run (the file may have been extracted and deleted since)
     if [[ -n "${recorded[$key]}" ]] && { (( SKIP_DOWNLOADED )) || [[ -s "$LOOT_DIR/${recorded[$key]}" ]]; }; then
         ((present++)); is_done
@@ -315,6 +344,12 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         continue
     fi
 
+    # A picture saved under its real extension (see below) counts too
+    if [[ "$kind" == "image" && ! -s "$dest" ]]; then
+        for e in png jpg webp gif; do
+            [[ -s "$(with_ext "$dest" "$e")" ]] && { dest="$(with_ext "$dest" "$e")"; break; }
+        done
+    fi
     if [[ -s "$dest" ]]; then
         record "$key" "${dest#"$LOOT_DIR/"}"
         ((present++)); is_done
@@ -377,6 +412,18 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 
     if (( result == 0 )); then
         refused_streak=0
+        # A picture whose content doesn't match its name (".jpg" that is really a PNG): give it
+        # the right extension instead of calling it damaged
+        if [[ "$kind" == "image" ]]; then
+            real_ext="$(image_real_ext "$dest")"
+            cur_ext="${dest##*.}"; cur_ext="${cur_ext,,}"; [[ "$cur_ext" == jpeg ]] && cur_ext=jpg
+            if [[ -n "$real_ext" && "$real_ext" != "$cur_ext" ]]; then
+                fixed="$(with_ext "$dest" "$real_ext")"
+                if [[ -e "$fixed" ]] && ! cmp -s "$dest" "$fixed"; then fixed="$(with_ext "${dest%.*}_2.x" "$real_ext")"; fi
+                mv -f "$dest" "$fixed" && dest="$fixed"
+                printf "    ${YELLOW}The site sent a %s picture - saved as %s${NC}\n" "${real_ext^^}" "${dest##*/}"
+            fi
+        fi
         if [[ $VERIFY -eq 1 ]]; then
             verify_archive "$dest"; v=$?
             if (( v == 1 )); then

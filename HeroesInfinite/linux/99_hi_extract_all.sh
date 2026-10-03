@@ -12,7 +12,8 @@
 #   where <x> decides the sub-folder:
 #     a size ("25mm_Round_Bases")       -> <category>/25mm/supported/ ...
 #     the category itself ("Centerpiece" in "Centerpiece") -> <category>/supported/ ...
-#     anything else ("King_Varkariack") -> <category>/King_Varkariack/supported/ ...
+#     anything else ("King_Varkariack") -> <category>/King_Varkariack/files/supported/ ...
+#                                          (pictures in <category>/King_Varkariack/images/)
 #   "Complete" archives (STL_Complete_...) are not extracted: they hold the same files
 #     again. COMPLETE="delete" deletes them (and folders extracted from them earlier).
 #   Names that don't fit the pattern go to <category>/<archive name>/.
@@ -204,7 +205,7 @@ target_for() {
         elif [[ "$(norm "$item")" == "$(norm "${cat##*/}")" ]]; then
             TARGET="$cat/$type"; IMAGES_DIR="$cat/images"
         else
-            TARGET="$cat/$item/$type"; IMAGES_DIR="$cat/$item/images"
+            TARGET="$cat/$item/files/$type"; IMAGES_DIR="$cat/$item/images"
         fi
     else
         TARGET="$cat/$base"; IMAGES_DIR=""          # unknown layout: leave its pictures where they are

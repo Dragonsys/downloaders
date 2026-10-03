@@ -13,7 +13,8 @@ Layout: `<collection>/<cover>.jpg`, `<collection>/<post>/<files>`, `<collection>
 | `browser/2_hi_export_list.js` | Browser Console | Copies the saved list to the clipboard |
 | `linux/3_hi_download.sh` | Linux | Downloads every file that isn't downloaded yet, using your cookie |
 | `browser/99_hi_reset.js` | Browser Console | Forgets everything collected (only to start fresh) |
-| `linux/99_hi_extract_all.sh` | Linux | Optional: extracts every downloaded archive into its own folder (see below) |
+| `linux/99_hi_extract_all.sh` | Linux | Optional: extracts every downloaded archive and sorts it (see below) |
+| `linux/99_hi_fix_extracted.sh` | Linux | One-off: moves models extracted by earlier versions into the `<Model>/files/` layout (see below) |
 
 ## Step 1 - Collect the download links (browser)
 
@@ -119,11 +120,14 @@ A dance with the Vampire/
 └── Vampires/
     └── King_Varkariack/
         ├── images/
-        ├── lychee/  supported/  unsupported/
+        └── files/
+            ├── lychee/
+            ├── supported/
+            └── unsupported/
 ```
 
 - `STL_<x>_SUPPORTED` → `supported/`, `STL_<x>_UNSUPPORTED` (or `Unsupported_<x>`) → `unsupported/`, `LYS_<x>` → `lychee/`, `CHITU_` / `Chitubox_<x>` → `chitubox/`. The typos and extras seen on the site are understood too (`Suported`, `SUPPORTER`, `-v3`, `_Reup`, `.stl.zip` ...). An `STL_<x>` without "supported" goes to `supported/` if there's an unsupported version of the same model next to it, otherwise to `stl/`.
-- If `<x>` contains a size (`25mm`), it becomes the size folder; if it's the category itself (`Centerpiece`), the files go straight into the category; otherwise (a character such as `King_Varkariack`) it gets its own folder.
+- If `<x>` contains a size (`25mm`), it becomes the size folder; if it's the category itself (`Centerpiece`), the files go straight into the category; otherwise (a character such as `King_Varkariack`) it gets its own folder, with the pictures in `images/` and the type folders in `files/`.
 - **"Complete" archives** (`STL_Complete_...`) hold the same models again, so they're not extracted but **deleted** (`COMPLETE="skip"` keeps them).
 - The files end up **directly** in `supported/`, `lychee/` ...: a folder the archive wraps them in (even `LYS_Centerpiece_SUPPORTED/LYS_Centerpiece_SUPPORTED/`) is removed.
 - **Pictures** in the archives go to `images/` (the same picture is in the SUPPORTED, UNSUPPORTED and LYS archives - it's kept once; a different picture with the same name gets `_2`). The downloader's `Images` folder is renamed to `images`.
@@ -139,6 +143,8 @@ It starts as a **dry run** and only lists what it would do; if that looks right,
 | `COMPLETE` | `"delete"` | `"skip"` = leave "Complete" archives alone |
 | `DELETE_AFTER_EXTRACT` | `0` | `1` = delete each archive once it's extracted successfully. Safe for Heroes Infinite: the downloader remembers what it downloaded (see below) |
 | `DRY_RUN` | `1` | `0` = actually extract, sort and delete |
+
+**Already extracted with an earlier version?** Those put a model's type folders straight into its folder (`Vampires/King_Varkariack/supported/`). `linux/99_hi_fix_extracted.sh` moves them into `files/` (`Vampires/King_Varkariack/files/supported/`) and updates `.hi_extracted.tsv`; a category's own files and size folders stay as they are. Copy it next to the other scripts, run `bash 99_hi_fix_extracted.sh` (a dry run that lists every folder it would move), then set `DRY_RUN=0` and run it again. Nothing is overwritten - a file whose name is already taken in `files/` stays in the old folder and is listed. Running it again is harmless.
 
 Damaged archives are kept and listed in `hi_failed_archives.txt`; they're tried again on the next run. Heroes Infinite sometimes spells one model differently in its archives (e.g. `STL_Apprentices` and `Unsupported_Appprentices`); those end up in two folders - merge them by hand.
 
