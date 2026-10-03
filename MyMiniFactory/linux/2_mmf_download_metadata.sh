@@ -28,6 +28,10 @@ USER_AGENT=''
 USER_AGENT_FILE="user_agent.txt"
 
 DELAY_SECONDS=3
+
+# Models to leave out: one ID per line ("# ..." = comment), in the current folder or next to
+# this script. Also used by 3_mmf_check_and_download.sh.
+EXCLUDE_FILE="exclude_models.txt"
 # ==============================
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,6 +74,28 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         echo -e "${YELLOW}Skipping invalid line: '$line'${NC}"
     fi
 done < "$ids_file"
+
+# Leave out the models listed in exclude_models.txt (an ID, a model URL or a "<id>_<name>"
+# folder name per line; "# ..." = comment)
+declare -A excluded=()
+exclude_file="$EXCLUDE_FILE"
+[[ ! -f "$exclude_file" && -f "$script_dir/$exclude_file" ]] && exclude_file="$script_dir/$exclude_file"
+if [[ -f "$exclude_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line//$'\r'/}"; line="${line#$'\xEF\xBB\xBF'}"; line="${line%%#*}"
+        if [[ "$line" =~ /object/[A-Za-z0-9_-]*-([0-9]+)([^A-Za-z0-9_-]|$) ]]; then excluded[${BASH_REMATCH[1]}]=1
+        elif [[ "$line" =~ ([0-9]+) ]]; then excluded[${BASH_REMATCH[1]}]=1; fi
+    done < "$exclude_file"
+fi
+n_excluded=0
+if (( ${#excluded[@]} )); then
+    kept=()
+    for id in "${ids[@]}"; do
+        if [[ -n "${excluded[$id]}" ]]; then n_excluded=$((n_excluded + 1)); else kept+=("$id"); fi
+    done
+    ids=("${kept[@]}")
+    (( n_excluded )) && echo -e "${YELLOW}Leaving out $n_excluded model(s) listed in $EXCLUDE_FILE${NC}"
+fi
 
 total=${#ids[@]}
 if (( total == 0 )); then
@@ -177,6 +203,7 @@ done
 
 echo ""
 echo -e "${GREEN}Done. $ok succeeded, $fail failed.${NC}"
+(( n_excluded > 0 )) && echo "$n_excluded model(s) left out (listed in $EXCLUDE_FILE)."
 (( from_library > 0 )) && echo "$from_library of them are private models; their file lists came from private_models.json."
 if (( fail > 0 )); then
     echo "Failed IDs are listed in '$JSON_OUTPUT_DIR/failed_ids.txt'."

@@ -29,6 +29,8 @@ ALL_FILES_OUTPUT="all_filenames_by_model.txt"
 HTML_OUTPUT="report.html"
 HTML_TEMP="report.tmp"
 TEMP_FILE="all_filenames_by_model.tmp"
+EXCLUDE_FILE="exclude_models.txt"            # models to leave out: one ID per line ("# ..." = comment),
+                                             # in the current folder or next to this script
 
 # ------------------------------
 # DOWNLOAD SETTINGS
@@ -91,6 +93,20 @@ DEFAULT_MODELS_DIR="$script_dir/models"
 # Remove trailing slashes so paths don't contain "//"
 JSON_DIR="${JSON_DIR%/}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR%/}"
+
+# Models left out on purpose (e.g. ones that always show as missing although you have them):
+# an ID, a model URL or a "<id>_<name>" folder name per line in exclude_models.txt
+declare -A excluded=()
+exclude_file="$EXCLUDE_FILE"
+[[ ! -f "$exclude_file" && -f "$script_dir/$exclude_file" ]] && exclude_file="$script_dir/$exclude_file"
+if [[ -f "$exclude_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line//$'\r'/}"; line="${line#$'\xEF\xBB\xBF'}"; line="${line%%#*}"
+        if [[ "$line" =~ /object/[A-Za-z0-9_-]*-([0-9]+)([^A-Za-z0-9_-]|$) ]]; then excluded[${BASH_REMATCH[1]}]=1
+        elif [[ "$line" =~ ([0-9]+) ]]; then excluded[${BASH_REMATCH[1]}]=1; fi
+    done < "$exclude_file"
+fi
+n_excluded=0
 
 # Escape text for safe use inside HTML
 html_escape() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
@@ -404,6 +420,9 @@ echo "<table>" >> "$HTML_TEMP"
 for json_file in "${json_files[@]}"; do
     model_id=$(basename "$json_file" .json)
     model_id="${model_id#model_}"
+    if [[ -n "${excluded[$model_id]}" ]]; then
+        n_excluded=$((n_excluded + 1)); printf "${YELLOW}Model %s: left out (%s)${NC}\n" "$model_id" "$EXCLUDE_FILE"; continue
+    fi
     model_dir="${DOWNLOAD_DIR}/model_${model_id}"
     # Renamed by 99_mmf_rename_folders_from_json.ps1 ("<id>_<name>")? Use that folder.
     # In IMAGES_ONLY mode also look in models/ next to this script (models not moved to DOWNLOAD_DIR yet).
@@ -579,6 +598,7 @@ if [[ $IMAGES_ONLY -eq 1 ]]; then
     rm -f "$TEMP_FILE" "$HTML_TEMP"
     echo -e "${YELLOW}================================================${NC}"
     echo -e " Models:                 ${BLUE}${#json_files[@]}${NC}"
+    (( n_excluded )) && echo -e " Left out:               ${YELLOW}${n_excluded}${NC} model(s) in ${EXCLUDE_FILE}"
     (( IMAGES_CREATE_FOLDERS )) && echo -e " New folders created:    ${folders_created}"
     (( ${#NO_IMAGES_MODELS[@]} )) && echo -e " No images listed:       ${#NO_IMAGES_MODELS[@]} - $(printf '%s ' "${NO_IMAGES_MODELS[@]:0:30}")"
     (( ${#NO_FOLDER_MODELS[@]} )) && echo -e " Skipped (no folder):    ${YELLOW}${#NO_FOLDER_MODELS[@]}${NC} - $(printf '%s ' "${NO_FOLDER_MODELS[@]:0:30}")"
@@ -687,6 +707,7 @@ fi
 echo -e " Missing files:          ${RED}${total_missing}${NC}"
 echo -e " Models with no files:   ${YELLOW}${no_file_models}${NC}"
 echo -e " Invalid JSON files:     ${YELLOW}${invalid_json}${NC}"
+(( n_excluded )) && echo -e " Left out:               ${YELLOW}${n_excluded}${NC} model(s) in ${EXCLUDE_FILE}"
 if [[ $IMAGES -eq 1 ]]; then
 echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed, ${images_skipped} skipped"
 fi

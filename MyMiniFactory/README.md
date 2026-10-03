@@ -156,6 +156,16 @@ The summary shows how many were downloaded; failures are listed in `failed_image
 
 **Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with `99_mmf_rename_folders_from_json.ps1`, `<id>_<name>`. If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
 
+**Leaving models out:** some models always show up as missing even though you have them (or can't be downloaded at all, like ones locked for your account). List them in **`exclude_models.txt`** next to `model_ids.txt`, one per line - the model ID, its URL, or its `<id>_<name>` folder name all work; `#` starts a comment:
+
+```
+240766          # locked for my account
+https://www.myminifactory.com/object/3d-print-some-model-282790
+851789_Yhal_The_Skygazer
+```
+
+Step 2 then doesn't fetch their metadata, and step 3 skips them completely: not checked, not in `missing_downloads.txt` or the reports, no pictures. Both summaries say how many were left out. Delete a line to bring that model back.
+
 ### Step 4 - Download the missing files (browser, Windows)
 
 1. Open `missing_downloads.txt` from your MyMiniFactory folder on your PC (copy it over if Windows can't see that folder).
