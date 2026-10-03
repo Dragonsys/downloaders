@@ -79,7 +79,7 @@ fi
 
 # Private models (made private by the creator, or taken off sale) are still in your library,
 # but the API answers 404 for them, and MyMiniFactory's bot check blocks scripts from the
-# library's own API. browser/2_mmf_private_models.js reads their file lists in your browser
+# library's own API. browser/99_mmf_private_models.js reads their file lists in your browser
 # and you save them as private_models.json (next to model_ids.txt); they're taken from there.
 private_file="private_models.json"
 [[ ! -f "$private_file" && -f "$script_dir/$private_file" ]] && private_file="$script_dir/$private_file"
@@ -185,7 +185,7 @@ fi
 if (( not_public > 0 )); then
     echo ""
     echo -e "${YELLOW}$not_public model(s) answered HTTP 404: usually models the creator has made private (they're still in your library).${NC}"
-    echo "To get them: paste the IDs from failed_ids.txt into browser/2_mmf_private_models.js, run it in the"
+    echo "To get them: paste the IDs from failed_ids.txt into browser/99_mmf_private_models.js, run it in the"
     echo "Console on myminifactory.com/library, save the result as private_models.json next to model_ids.txt,"
     echo "and run this script again (with failed_ids.txt as model_ids.txt)."
 fi
