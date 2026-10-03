@@ -18,6 +18,7 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 | 7 | `linux/3_mmf_check_and_download.sh` again (check) | Linux |
 | 8 | `windows/99_mmf_extract_all_zips.ps1` *(optional)* | Windows |
 | 9 | `windows/99_mmf_rename_folders_from_json.ps1` *(optional, always last)* | Windows |
+| - | `windows/99_mmf_move_images.ps1` *(optional: sorts the `.JPG` images you downloaded with the browser, see step 3)* | Windows |
 
 ---
 
@@ -122,7 +123,7 @@ Models the creator has made private (or taken off sale) stay in your library, bu
 3. Paste into **Notepad** and save as **`private_models.json`** next to `model_ids.txt` (Save as type: **All files**).
 4. Copy `downloads/failed_ids.txt` over `model_ids.txt` and run `2_mmf_download_metadata.sh` again. The private models now show `OK (private model ...)`.
 
-Then continue with step 3 as usual. Some older private models have one archive without an archive number; your download manager saves it as just `<model id>` (no `archive_id=` folder) - step 5 handles that. If an ID isn't found by the snippet either, the model was really removed.
+Then continue with step 3 as usual. Some older private models have one archive without an archive number; your download manager saves it as just `<model id>` (no `archive_id=` folder) - step 5 handles that. If an ID isn't found by the snippet either, the model was really removed. IDs listed as **"No access (locked for your account)"** are still shown in your library, but MyMiniFactory doesn't let you download them any more (often free models the creator has made private) - downloading them in the browser fails too, so there's nothing to get.
 
 ### Step 3 - Find what's missing (Linux)
 
@@ -145,12 +146,13 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 |---|---|---|
 | `IMAGES` | `1` | `0` = don't download pictures |
 | `IMAGE_SIZE` | `"large"` | `"large"` = 1000×1000 (~150 KB), `"standard"` = 720×720, `"original"` = full size (often 1 MB or more each - for thousands of models that's a lot of disk space) |
-| `IMAGE_DELAY_SECONDS` | `0.5` | Pause between pictures |
+| `IMAGE_DELAY_SECONDS` | `3` | Pause before every picture request, like step 2 |
+| `JPG_TO_BROWSER` | `1` | Pictures whose name ends in upper-case `.JPG` aren't requested (MyMiniFactory's bot check refuses those to scripts); they're listed in `missing_images.txt` for your browser's download manager, and `missing_images_map.tsv` says which model folder each belongs in |
 | `MAX_IMAGE_DOWNLOADS` | `0` (no limit) | Stop after this many pictures per run |
 | `IMAGES_ONLY` | `0` | `1` = only download pictures: files aren't checked, and `missing_downloads.txt` and the reports are left as they are |
 | `IMAGES_CREATE_FOLDERS` | `0` | With `IMAGES_ONLY=1`: `1` = a model without a folder gets a new `<id>_<name>` folder (named like step 9 names them) for its pictures; `0` = skip it |
 
-The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Older metadata may still point to the old image server (`dl2.myminifactory.com/object-assets/...`, which blocks scripts); the script uses the current address of the same picture instead, so there's no need to download the metadata again. If MyMiniFactory's bot check refuses 3 pictures in a row, picture downloads stop for that run and each model says how many it skipped - run it again later. Private models get their pictures too (`2_mmf_private_models.js` includes them in `private_models.json`).
+The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Older metadata may still point to the old image server (`dl2.myminifactory.com/object-assets/...`, which blocks scripts); the script uses the current address of the same picture instead, so there's no need to download the metadata again. The script paces itself like step 2: the same pause before every picture request (`IMAGE_DELAY_SECONDS`, 3 seconds); pictures already on disk are checked locally, without asking MyMiniFactory. MyMiniFactory's bot check refuses pictures whose name ends in upper-case `.JPG` to scripts (every other picture works), so those are listed in `missing_images.txt` instead - load that into your browser's download manager like `missing_downloads.txt` (keeping the folder structure it creates from the links), then run `windows/99_mmf_move_images.ps1` from your MyMiniFactory folder: it uses `missing_images_map.tsv` to move each one into `<model folder>\Images\` with the same name the script gives the other pictures. Dry run first, then `$DRY_RUN = $false`. By default it looks in `%USERPROFILE%\Downloads\assets.myminifactory.com` (`$DOWN_PATH`) and moves into `models\` next to it (`$MODELS_PATH`); downloads that aren't real JPEG images, aren't there yet, or match several images are left alone and listed in `move_images_problems.txt`. If any other picture is refused, the script stops picture downloads for that run (more requests would only keep the block going); each model then says how many it skipped - run it again a few hours later. Private models get their pictures too (`2_mmf_private_models.js` includes them in `private_models.json`).
 
 **Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with step 9, `<id>_<name>`. If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
 

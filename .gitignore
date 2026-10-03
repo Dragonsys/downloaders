@@ -7,6 +7,8 @@ user_agent.txt
 model_ids.txt
 *.tsv
 missing_downloads.txt
+missing_images.txt
+move_images_problems.txt
 failed_downloads.txt
 all_filenames_by_model.txt
 report.html
@@ -17,6 +19,9 @@ hi_failed.txt
 move_problems.txt
 failed_archives.txt
 rename_log.csv
+private_models.json
+failed_images.txt
+loot_done_bundles.js
 downloads/
 models/
 

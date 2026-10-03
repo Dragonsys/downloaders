@@ -66,8 +66,17 @@ IMAGES_CREATE_FOLDERS=0 # with IMAGES_ONLY=1: 1 = models without a folder get a 
                         #     in DOWNLOAD_DIR for their images; 0 = skip them
 IMAGE_SIZE="large"      # "large" (1000x1000, ~150 KB), "standard" (720x720, ~80 KB)
                         # or "original" (full size, often 1 MB or more - for a big library that adds up)
-IMAGE_DELAY_SECONDS=0.5 # pause between images
+IMAGE_DELAY_SECONDS=3   # pause before every image request, like 2_mmf_download_metadata.sh.
+                        # (Images already on disk are checked locally - no request, no pause.)
+                        # If MyMiniFactory's bot check refuses one, the image downloads stop at once:
+                        # every further request would only keep the block going. Run again later.
 MAX_IMAGE_DOWNLOADS=0   # stop downloading images after this many this run (0 = no limit)
+JPG_TO_BROWSER=1        # 1 = images whose name ends in upper-case ".JPG" are not requested: MyMiniFactory's
+                        #     bot check refuses those to scripts (every other image works). They're listed
+                        #     in missing_images.txt for your browser's download manager instead, with
+                        #     missing_images_map.tsv saying which model folder each one belongs in.
+MISSING_IMAGES_FILE="missing_images.txt"
+MISSING_IMAGES_MAP="missing_images_map.tsv"
 IMAGES_FAILED_FILE="failed_images.txt"
 # ==============================
 
@@ -157,6 +166,7 @@ MISSING_ENTRIES=()
 NO_FILE_MODELS=()
 INVALID_JSON_FILES=()
 NO_FOLDER_MODELS=()
+NO_IMAGES_MODELS=()
 LAST_ERROR=""
 
 # ------------------------------------------------------------
@@ -320,13 +330,20 @@ clean_name() {
     printf '%s' "$s"
 }
 
-images_present=0; images_downloaded=0; images_failed=0; images_absent=0; images_skipped=0; images_stopped=""; first_image=1; image_block_streak=0
-folders_created=0
+images_present=0; images_downloaded=0; images_failed=0; images_absent=0; images_skipped=0; images_stopped=""; first_image=1
+folders_created=0; images_listed=0
 [[ $IMAGES -eq 1 ]] && : > "$IMAGES_FAILED_FILE"
+if [[ $IMAGES -eq 1 && $JPG_TO_BROWSER -eq 1 ]]; then
+    : > "$MISSING_IMAGES_FILE"
+    printf 'url\tmodel_id\tfolder\tfile\n' > "$MISSING_IMAGES_MAP"
+fi
 
 # do_images JSON MODEL_DIR MODEL_ID - download the model's images that aren't there yet
 do_images() {
-    local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 absent=0 failed=0 skipped=0 r
+    local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 absent=0 failed=0 skipped=0 listed=0 r
+    local model_existed=0 images_existed=0
+    [[ -d "$2" ]] && model_existed=1
+    [[ -d "$dir" ]] && images_existed=1
     local -A used=()
     mapfile -t img_urls < <(jq -r --arg s "$IMAGE_SIZE" \
         '(.images // [])[] | (.[$s].url // .large.url // .original.url // empty)' "$json" 2>/dev/null)
@@ -347,23 +364,36 @@ do_images() {
         if [[ -z "$images_stopped" ]] && (( MAX_IMAGE_DOWNLOADS > 0 && images_downloaded + images_failed >= MAX_IMAGE_DOWNLOADS )); then
             images_stopped="reached MAX_IMAGE_DOWNLOADS ($MAX_IMAGE_DOWNLOADS) for this run"
         fi
+        # Upper-case ".JPG": refused to scripts by the bot check - list it for the browser instead
+        if [[ $JPG_TO_BROWSER -eq 1 && "${u%%\?*}" == *.JPG ]]; then
+            printf '%s\n' "${u// /%20}" >> "$MISSING_IMAGES_FILE"
+            printf '%s\t%s\t%s\t%s\n' "${u// /%20}" "$id" "$2" "Images/$name" >> "$MISSING_IMAGES_MAP"
+            ((listed++)); ((images_listed++)); continue
+        fi
         [[ -n "$images_stopped" ]] && { ((skipped++)); ((images_skipped++)); continue; }
+        # Throttle: the same pause before every image request (like step 2)
         (( first_image )) || sleep "$IMAGE_DELAY_SECONDS"
         first_image=0
         fetch_image "${u// /%20}" "$dir/$name"; r=$?
-        if (( r == 3 )); then image_block_streak=$((image_block_streak + 1)); else image_block_streak=0; fi
+        # Refused by the bot check: stop all image requests for this run - the block lasts a while,
+        # and more requests only keep it going
+        (( r == 3 )) && images_stopped="$LAST_ERROR - wait a few hours before the next run"
         case $r in
             0) ((images_downloaded++)); ((new++)) ;;
             4) ((images_absent++)); ((absent++)) ;;
             *) ((images_failed++)); ((failed++))
-               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE"
-               # A bot-check block now and then is skipped; several in a row means: stop
-               (( image_block_streak >= 3 )) && images_stopped="$LAST_ERROR (3 times in a row)" ;;
+               printf '%s\t%s\t%s\t%s\n' "$id" "$name" "$LAST_ERROR" "$u" >> "$IMAGES_FAILED_FILE" ;;
         esac
     done
-    printf "  ${BLUE}Images:${NC} %s new, %s already there (of %s)" "$new" "$have" "${#img_urls[@]}"
+    # No image saved: remove the folders this attempt created (never ones that were there before)
+    if (( new == 0 )); then
+        (( images_existed )) || rmdir "$dir" 2>/dev/null
+        (( model_existed )) || rmdir "$2" 2>/dev/null
+    fi
+    printf "  ${BLUE}Images:${NC} %s new, %s already there (%s of %s)" "$new" "$have" "$((new + have))" "${#img_urls[@]}"
     (( absent ))  && printf ", ${YELLOW}%s not on the server${NC}" "$absent"
     (( failed ))  && printf ", ${RED}%s failed${NC}" "$failed"
+    (( listed ))  && printf ", ${YELLOW}%s .JPG listed for the browser${NC}" "$listed"
     (( skipped )) && printf ", ${YELLOW}%s skipped - image downloads stopped: %s${NC}" "$skipped" "$images_stopped"
     printf "\n"
 }
@@ -415,12 +445,17 @@ for json_file in "${json_files[@]}"; do
             # New "<id>_<name>" folder (the name as the rename script makes it), just for the images
             cname="$(clean_name "$model_name")"
             model_dir="${DOWNLOAD_DIR}/${model_id}${cname:+_$cname}"
-            printf "  ${BLUE}New folder:${NC} %s\n" "${model_dir##*/}"
-            ((folders_created++))
             do_images "$json_file" "$model_dir" "$model_id"
+            # The folder only comes into being when its first image is saved
+            if [[ -d "$model_dir" ]]; then
+                printf "  ${BLUE}New folder:${NC} %s\n" "${model_dir##*/}"
+                ((folders_created++))
+            fi
+        elif [[ "${has_images:-0}" == "0" ]]; then
+            printf "  ${YELLOW}Skipped:${NC} no images listed for this model\n"
+            NO_IMAGES_MODELS+=("$model_id")
         else
             if (( several )); then why="several ${model_id}_* folders with files - not sure which"
-            elif [[ "${has_images:-0}" == "0" ]]; then why="no folder, and no images listed"
             else why="no model_${model_id} or ${model_id}_* folder"; fi
             printf "  ${YELLOW}Skipped:${NC} %s\n" "$why"
             NO_FOLDER_MODELS+=("$model_id")
@@ -545,11 +580,13 @@ if [[ $IMAGES_ONLY -eq 1 ]]; then
     echo -e "${YELLOW}================================================${NC}"
     echo -e " Models:                 ${BLUE}${#json_files[@]}${NC}"
     (( IMAGES_CREATE_FOLDERS )) && echo -e " New folders created:    ${folders_created}"
-    echo -e " Skipped (no folder):    ${YELLOW}${#NO_FOLDER_MODELS[@]}${NC}$( (( ${#NO_FOLDER_MODELS[@]} )) && printf ' - %s' "$(printf '%s ' "${NO_FOLDER_MODELS[@]:0:30}")")"
+    (( ${#NO_IMAGES_MODELS[@]} )) && echo -e " No images listed:       ${#NO_IMAGES_MODELS[@]} - $(printf '%s ' "${NO_IMAGES_MODELS[@]:0:30}")"
+    (( ${#NO_FOLDER_MODELS[@]} )) && echo -e " Skipped (no folder):    ${YELLOW}${#NO_FOLDER_MODELS[@]}${NC} - $(printf '%s ' "${NO_FOLDER_MODELS[@]:0:30}")"
     echo -e " Images:                 ${GREEN}${images_downloaded}${NC} downloaded, ${images_present} already there, ${images_absent} not on the server, ${RED}${images_failed}${NC} failed, ${images_skipped} skipped"
     echo -e "${YELLOW}================================================${NC}"
     [[ -n "$images_stopped" ]] && echo -e "${YELLOW}Image downloads stopped early: ${images_stopped}${NC}"
     (( images_failed > 0 )) && echo -e "${RED}Image failures saved to:${NC} ${YELLOW}${IMAGES_FAILED_FILE}${NC}"
+    (( images_listed > 0 )) && echo -e "${YELLOW}${images_listed} .JPG image(s) for your browser's download manager:${NC} ${MISSING_IMAGES_FILE} (target folders in ${MISSING_IMAGES_MAP})"
     exit 0
 fi
 
@@ -656,6 +693,7 @@ fi
 echo -e "${YELLOW}================================================${NC}"
 [[ -n "$images_stopped" ]] && echo -e "${YELLOW}Image downloads stopped early: ${images_stopped}${NC}"
 (( images_failed > 0 )) && echo -e "${RED}Image failures saved to:${NC} ${YELLOW}${IMAGES_FAILED_FILE}${NC}"
+(( images_listed > 0 )) && echo -e "${YELLOW}${images_listed} .JPG image(s) for your browser's download manager:${NC} ${MISSING_IMAGES_FILE} (target folders in ${MISSING_IMAGES_MAP})"
 [[ -n "$stop_reason" ]] && echo -e "${YELLOW}Downloads stopped early: ${stop_reason}${NC}"
 [[ $total_missing -gt 0 ]] && echo -e "${RED}Missing download URLs saved to:${NC} ${YELLOW}${OUTPUT_FILE}${NC}"
 [[ $DOWNLOAD_MISSING -eq 1 && $download_failed -gt 0 ]] && echo -e "${RED}Failure details saved to:${NC} ${YELLOW}${FAILED_FILE}${NC}"
