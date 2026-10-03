@@ -219,6 +219,36 @@ fi
 record() { (( DRY_RUN )) || printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"; }
 rel() { printf '%s' "${1#"$HI_DIR/"}"; }
 
+# Downloads that Heroes Infinite saved without an extension ("..._SUPPORTED" instead of
+# "..._SUPPORTED.zip"): add the one their content shows, so they're found below.
+# The downloader's ledger says which files are downloads; the new name is recorded there too.
+DL_LEDGER="$HI_DIR/.hi_downloaded.tsv"
+if [[ -f "$DL_LEDGER" ]]; then
+    declare -A dl_path=()
+    while IFS=$'\t' read -r lid lpath _; do [[ -n "$lid" ]] && dl_path[$lid]="$lpath"; done < <(tr -d '\r' < "$DL_LEDGER")
+    noext=0
+    for lid in "${!dl_path[@]}"; do
+        lpath="${dl_path[$lid]}"
+        [[ "$lpath" == "("* || ! -s "$HI_DIR/$lpath" ]] && continue
+        [[ "${lpath,,}" =~ \.(zip|rar|7z|png|jpe?g|gif|webp|pdf|stl|obj|3mf|lys|chitubox|ctb|mp4|txt)$ ]] && continue
+        case "$(head -c 4 "$HI_DIR/$lpath" | od -An -tx1 | tr -d ' \n')" in
+            504b0304*|504b0506*) ext=zip ;;
+            52617221*) ext=rar ;;
+            377abcaf*) ext=7z ;;
+            *) continue ;;
+        esac
+        new="$lpath.$ext"; [[ -e "$HI_DIR/$new" ]] && new="${lpath}_2.$ext"
+        ((noext++))
+        if (( DRY_RUN )); then
+            printf "  ${YELLOW}would add the missing extension:${NC} %s (extracted on the real run)\n" "$new"
+        else
+            mv -n "$HI_DIR/$lpath" "$HI_DIR/$new" && printf '%s\t%s\t%s\n' "$lid" "$new" "$(date '+%Y-%m-%d %H:%M')" >> "$DL_LEDGER"
+            printf "  ${BLUE}Added the missing extension:${NC} %s\n" "$new"
+        fi
+    done
+    (( noext )) && echo ""
+fi
+
 # All archives below HI_DIR, but not inside folders made from archives (nested zips stay as they are)
 mapfile -d '' archives < <(find "$HI_DIR" -type f \( -iname '*.zip' -o -iname '*.rar' -o -iname '*.7z' \) \
     -not -path '*_extracted/*' -not -path '*_extracted.part/*' -not -path '*/.extract_*' \

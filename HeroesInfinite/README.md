@@ -75,7 +75,7 @@ bash 3_hi_download.sh
 
 **First run:** set `MAX_DOWNLOADS=2`, run it, check where the two files landed, then set it back to `0`.
 
-The links in the list **don't expire**, so there's no hurry - stop it any time (Ctrl+C) and run it again later; it continues where it left off. For each file it asks Heroes Infinite where the file is (that's where your cookie is used), then downloads it from Kajabi's file storage (your cookie is never sent there), tests zips, and records it in `HI_DIR/.hi_downloaded.tsv` so it's skipped on later runs.
+The links in the list **don't expire**, so there's no hurry - stop it any time (Ctrl+C) and run it again later; it continues where it left off. For each file it asks Heroes Infinite where the file is (that's where your cookie is used), then downloads it from Kajabi's file storage (your cookie is never sent there), tests zips, and records it in `HI_DIR/.hi_downloaded.tsv` so it's skipped on later runs. Some files come from the site **without an extension** (e.g. `..._SUPPORTED` instead of `..._SUPPORTED.zip`): the downloader looks at the content, adds `.zip` (or `.rar`/`.7z`) and then tests it. Files downloaded earlier without an extension are renamed and tested at the start of the next run (a damaged one is deleted and downloaded again), and `99_hi_extract_all.sh` renames them too.
 
 | Line | Meaning |
 |---|---|

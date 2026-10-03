@@ -107,6 +107,32 @@ safe_name() {
     printf '%s' "$s"
 }
 
+# Heroes Infinite sometimes leaves the extension off a file name ("..._SUPPORTED" instead of
+# "..._SUPPORTED.zip"). add_missing_ext RELPATH gives such a file the extension its content
+# shows (zip/rar/7z/png/jpg) and prints the new relative path (the old one if nothing changed).
+KNOWN_EXT='zip|rar|7z|png|jpe?g|gif|webp|pdf|stl|obj|3mf|lys|chitubox|ctb|mp4|txt'
+add_missing_ext() {
+    local rp="$1" magic ext new
+    if [[ "${rp,,}" =~ \.($KNOWN_EXT)$ || ! -s "$HI_DIR/$rp" ]]; then printf '%s' "$rp"; return; fi
+    magic=$(head -c 4 "$HI_DIR/$rp" | od -An -tx1 | tr -d ' \n')
+    case "$magic" in
+        504b0304*|504b0506*) ext=zip ;;
+        52617221*) ext=rar ;;
+        377abcaf*) ext=7z ;;
+        89504e47*) ext=png ;;
+        ffd8ff*)   ext=jpg ;;
+        *) printf '%s' "$rp"; return ;;
+    esac
+    new="$rp.$ext"
+    if [[ -e "$HI_DIR/$new" ]]; then
+        # The same file is there already with its extension? Then drop the copy without one.
+        if cmp -s "$HI_DIR/$rp" "$HI_DIR/$new"; then rm -f "$HI_DIR/$rp"; printf '%s' "$new"; return; fi
+        new="${rp}_2.$ext"
+    fi
+    mv -f "$HI_DIR/$rp" "$HI_DIR/$new" && rp="$new"
+    printf '%s' "$rp"
+}
+
 # Check a finished archive. 0 = OK, 1 = broken, 2 = not checked
 verify_archive() {
     local f="$1" magic
@@ -217,10 +243,12 @@ fetch_file() {
 
 # ---------- read the ledger (download id -> file path, relative to HI_DIR) ----------
 declare -A ledger=() path_owner=()
+FORGOTTEN_MARK="(damaged - download again)"   # a later line with this path cancels the entry
 if [[ -f "$LEDGER" ]]; then
     while IFS=$'\t' read -r lid lpath _; do
         [[ -n "$lid" && -n "$lpath" ]] || continue
         ledger[$lid]="$lpath"; path_owner[$lpath]="$lid"
+        [[ "$lpath" == "$FORGOTTEN_MARK" ]] && unset "ledger[$lid]"
     done < <(tr -d '\r' < "$LEDGER")
 fi
 record() {   # record ID RELPATH   (third column: date, for your information)
@@ -229,6 +257,27 @@ record() {   # record ID RELPATH   (third column: date, for your information)
     printf '%s\t%s\t%s\n' "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"
 }
 NOT_DOWNLOADED_MARK="(recorded with MARK_ALL_DOWNLOADED)"
+
+# Files downloaded earlier without an extension: add it now, test them, record the new name
+fixed_ext=0; fixed_bad=0
+for lid in "${!ledger[@]}"; do
+    lpath="${ledger[$lid]}"
+    [[ "$lpath" == "("* || ! -s "$HI_DIR/$lpath" ]] && continue
+    npath="$(add_missing_ext "$lpath")"
+    [[ "$npath" == "$lpath" ]] && continue
+    ((fixed_ext++))
+    printf "  ${BLUE}Added the missing extension:${NC} %s\n" "$npath"
+    if [[ $VERIFY -eq 1 ]] && { verify_archive "$HI_DIR/$npath"; (( $? == 1 )); }; then
+        ((fixed_bad++))
+        printf "    ${RED}✗ damaged (%s) - deleted, it will be downloaded again${NC}\n" "$LAST_ERROR"
+        rm -f "$HI_DIR/$npath"
+        unset "ledger[$lid]"
+        printf '%s\t%s\t%s\n' "$lid" "$FORGOTTEN_MARK" "$(date '+%Y-%m-%d %H:%M')" >> "$LEDGER"
+        continue
+    fi
+    record "$lid" "$npath"
+done
+(( fixed_ext )) && printf "Files without extension fixed: %s%s\n\n" "$fixed_ext" "$( (( fixed_bad )) && echo " ($fixed_bad damaged, to be downloaded again)")"
 
 # ---------- read the list ----------
 mapfile -t lines < <(sed $'1s/^\xEF\xBB\xBF//; s/\r$//' "$LIST_FILE")
@@ -318,8 +367,16 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         relpath="$reldir/${name%.*}_$id${name##"${name%.*}"}"
     fi
 
-    # Already there (downloaded earlier or by hand)?
+    # Already there (downloaded earlier or by hand)? Maybe with the missing extension added.
+    if [[ ! -s "$HI_DIR/$relpath" && ! "${relpath,,}" =~ \.($KNOWN_EXT)$ ]]; then
+        for e in zip rar 7z; do [[ -s "$HI_DIR/$relpath.$e" ]] && { relpath="$relpath.$e"; break; }; done
+    fi
+    # ... or the other way round: the site now names it "x.zip", but it was saved as "x"
+    if [[ ! -s "$HI_DIR/$relpath" && "${relpath,,}" =~ \.(zip|rar|7z)$ && -s "$HI_DIR/${relpath%.*}" ]]; then
+        [[ "$(add_missing_ext "${relpath%.*}")" == "$relpath" ]] && printf "    ${BLUE}Added the missing extension:${NC} %s\n" "${relpath##*/}"
+    fi
     if [[ -s "$HI_DIR/$relpath" ]]; then
+        relpath="$(add_missing_ext "$relpath")"
         record "$id" "$relpath"
         ((present++)); printf "  ${GREEN}✓${NC} %s (%s, already there)\n" "$what" "$name"; continue
     fi
@@ -342,6 +399,12 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
             if [[ -n "$cd_safe" && "$cd_safe" != "$name" && ! -e "$HI_DIR/$reldir/$cd_safe" ]]; then
                 mv -f "$HI_DIR/$relpath" "$HI_DIR/$reldir/$cd_safe" && relpath="$reldir/$cd_safe"
             fi
+        fi
+        # No extension in the name? Add the one the content shows (e.g. .zip), then test it
+        newrel="$(add_missing_ext "$relpath")"
+        if [[ "$newrel" != "$relpath" ]]; then
+            printf "    ${BLUE}No extension in the file name - saved as %s${NC}\n" "${newrel##*/}"
+            relpath="$newrel"
         fi
         if [[ $VERIFY -eq 1 ]]; then
             verify_archive "$HI_DIR/$relpath"; v=$?
