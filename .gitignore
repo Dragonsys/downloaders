@@ -19,6 +19,7 @@ hi_failed.txt
 move_problems.txt
 failed_archives.txt
 hi_failed_archives.txt
+loot_failed_archives.txt
 rename_log.csv
 private_models.json
 failed_images.txt

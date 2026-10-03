@@ -24,6 +24,7 @@ It works in two halves:
 | `browser/2_loot_export_list.js` | Browser Console | Copies the collected list to the clipboard |
 | `linux/3_loot_download_all_bundles.sh` | Linux | Checks what's already downloaded and downloads what's missing |
 | `browser/99_loot_reset.js` | Browser Console | Forgets everything collected (only if you want to start fresh) |
+| `linux/99_loot_extract_all.sh` | Linux | Optional: extracts the zips and sorts them into `<group>/<model>-<type>/<scale>/` folders (see below) |
 | `linux/99_loot_fix_folders.sh` | Linux | One-off: moves newer bundles out of the `Fantasy/` folder older versions put them in (see below) |
 
 ---
@@ -159,15 +160,56 @@ You don't have to keep the downloaded zips. Every finished file is recorded in *
 
 ---
 
-## Optional: extract the zips
+## Optional: extract and sort the zips (Linux)
 
-The MyMiniFactory extract script works for these too. In `MyMiniFactory/windows/99_mmf_extract_all_zips.ps1`, set:
+Copy `linux/99_loot_extract_all.sh` next to the downloader and run it:
 
-```powershell
-$BASE_PATH = 'Z:\3DPrints\LootStudios'   # your Loot Studios folder
+```bash
+cd /mnt/nas/3DPrints/LootStudios
+bash 99_loot_extract_all.sh
 ```
 
-and run it (see the MyMiniFactory guide, step 8). Each zip is extracted into its own `..._extracted` folder; keep the zips so the downloader still sees them as present.
+A Loot Studios zip holds a whole bundle at one scale, in folders like `All_ShadowCourt_32mm_LYCHEE/2-Enemies/DeathGiant_32mm_LYCHEE/`. The script extracts every zip and **sorts it by model while extracting**, inside the bundle's folder:
+
+```
+ShadowCourt/
+├── Enemies/
+│   ├── images/                         pictures of the Enemies (each kept once)
+│   ├── DeathGiant-lychee/
+│   │   ├── 32mm/                       from All_ShadowCourt_32mm.zip
+│   │   ├── 75mm/                       from All_ShadowCourt_75mm.zip
+│   │   └── bust/                       from All_ShadowCourt_Bust.zip
+│   ├── DeathGiant-supported/
+│   │   ├── 32mm/  75mm/  bust/
+│   ├── DeathGiant-unsupported/ ...
+│   └── DeathGiant-3mf/32mm/            from ShadowCourt_All_FDM.zip
+├── Heroes/ ...
+├── Environment/ ...
+└── Prop/
+    └── RoyalSeal-lychee/prop/
+```
+
+- **Type** (from the end of the model's folder name): `LYCHEE` / `Supported_LYCHEE` / `Supported_SLICER` → `lychee`, `ReadyToSlice` / `Supported` → `supported`, `Supported_Hollow` → `hollow`, `Supported_Solid` → `solid` (older bundles have both), `UnSupported` / `NoSupports` → `unsupported`, `Supported_CHITUBOX` → `chitubox`, `FDM` → `fdm`, `3mf` → `3mf`. Typos seen in real zips (`LYHCEE`, `UnSuppoted`, `ReadyToSlicer` ...) are understood.
+- **Scale**: `32mm`, `75mm`, `bust`, `prop` ... from the folder names, or else the zip's name.
+- **Group** (`Heroes`, `Enemies`, `Environment`, `Prop`, `NPCs` ...) from the folders above the model, in every spelling Loot has used (`1-Heroes`, `All_Enemies_CelticDawn_32mm`, `All_75mm_Heroes_Supported_Solid` ...). `Prop`/`Props` or `Enviroment`/`Environment` end up in one folder. **Busts** usually come without a group: a bust goes to the group its model has in the bundle's other zips, otherwise to `Busts/`. Single-figure downloads use the group folder the downloader put them in.
+- **Pictures** in the zips go to the group's `images/`; the downloader's `Images/<group>/` pictures move there too (`MOVE_IMAGES=1`).
+- Models made of parts in subfolders keep them (`Megalodon-lychee/32mm/SharkTail/`). Zips inside zips are extracted too.
+- `Thumbs.db`, `desktop.ini` and Loot's "Read me" notes are left out (`KEEP_READMES=1` keeps the notes).
+- Zips without model folders (statblocks, GM screen, tools) are extracted into `<bundle>/<zip name>/`, as they are.
+- Nothing is ever overwritten. If a different file with the same name is already there, the new one goes to `<bundle>/<zip name>/` instead, and the zip isn't deleted. What was extracted is remembered in `.loot_extracted.tsv`, so each zip is extracted only once - even after you've deleted it.
+
+It starts as a **dry run**: it only reads the zips' tables of contents (quick, even on a NAS), shows a few model folders per zip and writes the full plan - every folder in every zip and where it would go - to `loot_extract_plan.tsv`. If that looks right, set `DRY_RUN=0` and run it again.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LOOT_DIR` | empty (the script's folder) | Where the bundles are (same as in `3_loot_download_all_bundles.sh`) |
+| `BUSTS_GROUP` | `"Busts"` | Group folder for busts whose model isn't in another group of the bundle |
+| `MOVE_IMAGES` | `1` | `0` = leave the downloader's `Images/` folder alone |
+| `KEEP_READMES` | `0` | `1` = keep Loot's "... - Read me.txt" notes |
+| `DELETE_AFTER_EXTRACT` | `0` | `1` = delete each zip once it's extracted completely. Safe: the downloader remembers what it downloaded (see above) |
+| `DRY_RUN` | `1` | `0` = actually extract, sort and delete |
+
+Damaged zips are kept and listed in `loot_failed_archives.txt`; they're tried again on the next run. Your model manager may want a different layout - the folder names come from a few rules near the top of the script (`TYPE_RULES`), easy to change.
 
 ---
 

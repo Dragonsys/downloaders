@@ -5,7 +5,7 @@ Scripts for backing up the 3D-print files you've **purchased or subscribed to** 
 Each site has its own folder with a step-by-step guide:
 
 - **[MyMiniFactory/README.md](MyMiniFactory/README.md)** - library IDs, metadata, checking, organizing, extracting, renaming
-- **[LootStudios/README.md](LootStudios/README.md)** - collecting and downloading every bundle's "All Bundle" files
+- **[LootStudios/README.md](LootStudios/README.md)** - collecting and downloading every bundle's files, extracting and sorting them by model
 - **[HeroesInfinite/README.md](HeroesInfinite/README.md)** - collecting and downloading every file in your library
 
 ## What runs where
