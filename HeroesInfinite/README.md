@@ -102,14 +102,45 @@ cd /mnt/nas/3DPrints/HeroesInfinite
 bash 99_hi_extract_all.sh
 ```
 
-It extracts every `.zip` in your Heroes Infinite folder (and `.rar` / `.7z` if `unrar` or `7zip` is installed: `sudo apt install unrar 7zip`) into its own `<archive name>_extracted` folder next to it, so files from different archives never overwrite each other. Archives that are already extracted are skipped, so you can run it after every download round. Extraction happens in a temporary `..._extracted.part` folder first, so an interrupted run never leaves a half-filled folder.
+It extracts every `.zip` in your Heroes Infinite folder (and `.rar` / `.7z` if `unrar` or `7zip` is installed: `sudo apt install unrar 7zip`) and **sorts it while extracting**, into the category folder the downloader put it in (`Bases`, `Vampires`, ...):
+
+```
+A dance with the Vampire/
+├── Bases/
+│   ├── images/                  pictures of the bases
+│   ├── 25mm/supported/          from STL_25mm_Round_Bases_SUPPORTED.zip
+│   ├── 25mm/unsupported/        from STL_25mm_Round_Bases_UNSUPPORTED.zip
+│   └── 30mm/ ...
+├── Centerpiece/
+│   ├── images/
+│   ├── lychee/                  from LYS_Centerpiece_SUPPORTED.zip
+│   ├── supported/               from STL_Centerpiece_SUPPORTED.zip
+│   └── unsupported/             from STL_Centerpiece_UNSUPPORTED.zip
+└── Vampires/
+    └── King_Varkariack/
+        ├── images/
+        ├── lychee/  supported/  unsupported/
+```
+
+- `STL_<x>_SUPPORTED` → `supported/`, `STL_<x>_UNSUPPORTED` (or `Unsupported_<x>`) → `unsupported/`, `LYS_<x>` → `lychee/`, `CHITU_` / `Chitubox_<x>` → `chitubox/`. The typos and extras seen on the site are understood too (`Suported`, `SUPPORTER`, `-v3`, `_Reup`, `.stl.zip` ...). An `STL_<x>` without "supported" goes to `supported/` if there's an unsupported version of the same model next to it, otherwise to `stl/`.
+- If `<x>` contains a size (`25mm`), it becomes the size folder; if it's the category itself (`Centerpiece`), the files go straight into the category; otherwise (a character such as `King_Varkariack`) it gets its own folder.
+- **"Complete" archives** (`STL_Complete_...`) hold the same models again, so they're not extracted but **deleted** (`COMPLETE="skip"` keeps them).
+- The files end up **directly** in `supported/`, `lychee/` ...: a folder the archive wraps them in (even `LYS_Centerpiece_SUPPORTED/LYS_Centerpiece_SUPPORTED/`) is removed.
+- **Pictures** in the archives go to `images/` (the same picture is in the SUPPORTED, UNSUPPORTED and LYS archives - it's kept once; a different picture with the same name gets `_2`). The downloader's `Images` folder is renamed to `images`.
+- Archives whose name doesn't fit any of this (e.g. `Choir_of_Fury_Extra.zip`) are extracted into `<category>/<archive name>/`.
+- Nothing is ever overwritten. What was extracted where is remembered in `.hi_extracted.tsv`, so each archive is extracted only once - even after you've deleted it.
+
+It starts as a **dry run** and only lists what it would do; if that looks right, set `DRY_RUN=0` and run it again.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `HI_DIR` | empty (the script's folder) | Where the Heroes Infinite files are (same as in `3_hi_download.sh`) |
+| `ORGANIZE` | `1` | `0` = don't sort: each archive into its own `<archive name>_extracted` folder |
+| `COMPLETE` | `"delete"` | `"skip"` = leave "Complete" archives alone |
 | `DELETE_AFTER_EXTRACT` | `0` | `1` = delete each archive once it's extracted successfully. Safe for Heroes Infinite: the downloader remembers what it downloaded (see below) |
+| `DRY_RUN` | `1` | `0` = actually extract, sort and delete |
 
-Damaged archives are kept and listed in `hi_failed_archives.txt`; they're tried again on the next run.
+Damaged archives are kept and listed in `hi_failed_archives.txt`; they're tried again on the next run. Heroes Infinite sometimes spells one model differently in its archives (e.g. `STL_Apprentices` and `Unsupported_Appprentices`); those end up in two folders - merge them by hand.
 
 ## Deleting the files after extracting
 

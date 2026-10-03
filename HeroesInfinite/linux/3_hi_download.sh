@@ -119,7 +119,11 @@ verify_archive() {
         *.zip)
             [[ "$magic" == 504b0304* || "$magic" == 504b0506* ]] || { LAST_ERROR="not a zip file (got: $(head -c 60 "$f" | tr -cd '[:print:]'))"; return 1; }
             command -v unzip &>/dev/null || return 2
-            unzip -tq "$f" &>/dev/null || { LAST_ERROR="zip test failed (damaged or incomplete)"; return 1; } ;;
+            # unzip exit codes: 0 = OK, 1 = warnings only (e.g. a file name stored in two different
+            # encodings, like "Shee’Far" - the data is fine, Windows doesn't mind), 2+ = real errors
+            local zout zrc
+            zout=$(unzip -tq "$f" 2>&1); zrc=$?
+            (( zrc <= 1 )) || { LAST_ERROR="zip test failed (damaged or incomplete): $(grep -m1 -v -e '^[[:space:]]*$' -e '^\[' <<< "$zout" | tr -s ' ' | head -c 150)"; return 1; } ;;
         *.rar)
             [[ "$magic" == 52617221* ]] || { LAST_ERROR="not a rar file"; return 1; }
             if command -v unrar &>/dev/null; then unrar t -idq "$f" &>/dev/null || { LAST_ERROR="rar test failed"; return 1; }
