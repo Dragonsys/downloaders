@@ -17,6 +17,10 @@ report.tmp
 loot_failed.txt
 loot_expired.txt
 hi_failed.txt
+patreon_failed.txt
+patreon_links.txt
+mw_failed.txt
+mw_missing.txt
 move_problems.txt
 failed_archives.txt
 hi_failed_archives.txt
