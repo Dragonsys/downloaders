@@ -1,6 +1,6 @@
 # 3D Print Download Toolkit
 
-Scripts for backing up the 3D-print files you've **purchased or subscribed to** from **MyMiniFactory**, **Loot Studios**, **Heroes Infinite**, **Patreon** and **MakerWorld** to your own storage - a local disk or a NAS.
+Scripts for backing up the 3D-print files you've **purchased or subscribed to** from **MyMiniFactory**, **Loot Studios**, **Heroes Infinite**, **Patreon**, **MakerWorld** and **Cults3D** to your own storage - a local disk or a NAS.
 
 Each site has its own folder with a step-by-step guide:
 
@@ -9,18 +9,19 @@ Each site has its own folder with a step-by-step guide:
 - **[HeroesInfinite/README.md](HeroesInfinite/README.md)** - collecting and downloading every file in your library
 - **[Patreon/README.md](Patreon/README.md)** - collecting and downloading the files attached to the posts of every creator you support (several accounts)
 - **[MakerWorld/README.md](MakerWorld/README.md)** - your collections, download history and liked models: model files, print profiles, pictures and descriptions
+- **[Cults3D/README.md](Cults3D/README.md)** - your purchases: downloaded by your browser, then sorted by a Windows script into creator/model folders with pictures and descriptions
 
 ## What runs where
 
 | Folder | Runs on | How |
 |---|---|---|
 | `*/browser/*.js` | Your browser (Chrome/Edge), logged in to the site | Paste into the Console (F12) |
-| `*/linux/*.sh` | Linux (bash, curl; plus jq for MyMiniFactory and MakerWorld, unzip for testing archives) | `bash scriptname.sh` |
-| `MyMiniFactory/windows/*.ps1` | Windows PowerShell (PowerShell 7 recommended) | `pwsh -ExecutionPolicy Bypass -File .\scriptname.ps1` |
+| `*/linux/*.sh` | Linux (bash, curl; plus jq for MyMiniFactory, unzip for testing archives) | `bash scriptname.sh` |
+| `MyMiniFactory/windows/*.ps1`, `Cults3D/windows/*.ps1` | Windows PowerShell (PowerShell 7 recommended) | `pwsh -ExecutionPolicy Bypass -File .\scriptname.ps1` |
 
 ## Script names
 
-Every script starts with its **step number** and a site prefix (`mmf_`, `loot_`, `hi_`, `patreon_`, `mw_`), so the files sort in the order you use them:
+Every script starts with its **step number** and a site prefix (`mmf_`, `loot_`, `hi_`, `patreon_`, `mw_`, `cults_`), so the files sort in the order you use them:
 
 - `1_`, `2_`, `3_` ... are the steps, in order. A missing number (e.g. MyMiniFactory step 4) is a manual step, explained in that site's guide.
 - `99_` marks **optional** scripts (extracting, renaming, resetting).
@@ -37,7 +38,8 @@ Make one folder per site and **copy that site's scripts into it**. The scripts s
 ├── LootStudios/           3_loot_download_all_bundles.sh, its lists, and the bundle folders
 ├── HeroesInfinite/        3_hi_download.sh, its lists, and the collection folders
 ├── Patreon/               3_patreon_download.sh, its lists (one per account), and the creator folders
-└── MakerWorld/            1_mw_download.sh, its cookie, and the collection folders
+├── MakerWorld/            .mw_downloaded.tsv and the collection folders (filled by the browser script)
+└── Cults3D/               2_cults_sort_downloads.ps1, .cults_downloaded.tsv and the creator folders
 ```
 
 The folder names and location are up to you. The examples in the guides use `/mnt/nas/3DPrints/<site>` - replace that with your own folder.

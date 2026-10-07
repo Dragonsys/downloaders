@@ -1,6 +1,6 @@
 # MakerWorld - your collections, download history and liked models
 
-Downloads the models in your **collections**, your **download history** and your **liked models** on [makerworld.com](https://makerworld.com) to your storage (e.g. a NAS), sorted like this:
+Downloads the models in your **collections**, your **download history** and your **liked models** on [makerworld.com](https://makerworld.com) straight into a folder of your choice (e.g. on your NAS), sorted like this:
 
 ```
 MakerWorld/
@@ -22,73 +22,64 @@ Paid models you've bought (or got with points) are in your download history once
 
 ## How it works
 
-Everything runs on **Linux** - there's no browser step. With your login cookie, the script reads your lists on makerworld.com and, for each model, asks MakerWorld for the download links (the same requests the site makes when you click Download). Those links expire after **5 minutes**, so each one is fetched right before it's used. The cookie is only sent to makerworld.com, never to the file server.
+It runs **in your browser**, on makerworld.com, while you're logged in - it uses the site exactly like you do: it reads your lists and, for each model, asks for the download links (the same requests the site makes when you click Download) and saves the files into the folder you picked. Nothing to copy: no cookie, no user agent.
 
-Every link request counts as a download on MakerWorld, like clicking Download on the site. The script pauses 5 seconds before each one.
+Why the browser: MakerWorld's download links expire after 5 minutes, so they can't be collected now and downloaded later, and MakerWorld's Cloudflare bot check refuses scripts on Linux for your personal lists (with or without a cookie). The Linux script `linux/99_mw_download.sh` is still there - it works where Cloudflare lets it through (e.g. from Windows with Git Bash) and uses the same layout and record file.
+
+Every link request counts as a download on MakerWorld, like clicking Download on the site. The script pauses 15 seconds before each one.
 
 ## Files
 
 | File | Where | Purpose |
 |---|---|---|
-| `linux/1_mw_download.sh` | Linux | Reads your lists and downloads what's missing |
+| `browser/1_mw_download.js` | Browser Console | Reads your lists and downloads what's missing into the folder you choose |
+| `linux/99_mw_download.sh` | Linux | Optional: the same with curl and your cookie - only where Cloudflare doesn't block it |
 
 ---
 
-## One-time setup (Linux)
+## One-time setup
 
-1. Install the tools (Debian/Ubuntu):
+- Use **Chrome or Edge** (other browsers can't save into a folder from a web page).
+- Make your **MakerWorld folder**, e.g. on the NAS. On Windows, a network share works best as a **mapped drive** (File Explorer → This PC → Map network drive, e.g. `Z:` → `\\192.168.1.10\3D_Printer`).
+- Console setup: open the Console (F12 → Console). If it asks, type `allow pasting` and press Enter. To hide unrelated Console "noise" (red errors from the site's own scripts): click the gear icon at the top right of the Console, tick **"Hide network"** and **"Selected context only"**.
 
-   ```bash
-   sudo apt install curl jq unzip
-   ```
+## Step 1 - Download (browser)
 
-2. Make your **MakerWorld folder** and put `1_mw_download.sh` in it. The models are stored in the folder the script is in (to use another folder, set `MW_DIR` at the top of the script). These examples use `/mnt/nas/3DPrints/MakerWorld`:
+1. Log in on **makerworld.com**, open the Console (F12) and paste `browser/1_mw_download.js`, press Enter.
+2. A panel appears at the bottom right. Click **Choose folder** and pick your MakerWorld folder. The browser asks whether the site may edit files there - **allow** it ("Edit files"). It may also warn about folders with system files; pick a normal folder.
+3. It reads your collections, history and likes, then downloads model by model. Keep the tab open (you can close DevTools); **Stop** stops after the current file.
 
-   ```bash
-   mkdir -p /mnt/nas/3DPrints/MakerWorld
-   cp 1_mw_download.sh /mnt/nas/3DPrints/MakerWorld/
-   cd /mnt/nas/3DPrints/MakerWorld
-   sed -i 's/\r$//' 1_mw_download.sh     # only needed if it was copied or edited on Windows
-   ```
+Next time, the button says **Continue in "<folder>"** - one click and the browser asks for permission again (Shift+click to pick another folder). Every finished part (model files, each print profile, the pictures, the description) is recorded in **`.mw_downloaded.tsv`** in the folder, and a model downloaded completely is skipped on later runs without asking MakerWorld again.
 
-3. In that folder, create:
-   - **`cookie.txt`** - from **makerworld.com**: log in, open your profile, F12 → **Network** → **Doc** → F5 → click the first request → **Headers** → **Request Headers** → right-click `cookie` → **Copy value**. Paste into the file, save, then `chmod 600 cookie.txt`. Never share this file - it's your login.
-   - **`user_agent.txt`** - run `navigator.userAgent` in the same browser's Console and paste the result.
-
-## Step 1 - Download (Linux)
-
-```bash
-cd /mnt/nas/3DPrints/MakerWorld
-bash 1_mw_download.sh
-```
-
-For a first test, set `MAX_MODELS=2`. Stop it any time (Ctrl+C) and run it again - it continues where it left off. Every finished part (model files, each print profile, the pictures, the description) is recorded in `.mw_downloaded.tsv`, and a model downloaded completely is skipped on later runs without asking MakerWorld again.
+For a first test, set `MAX_MODELS = 2` at the top of the script. Settings:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MW_DIR` | empty (the script's folder) | Where the models go |
-| `SOURCES` | `"collections downloads likes"` | What to download; remove what you don't want |
-| `COLLECTIONS` | empty (all) | Only these collections, e.g. `"Pokemon|D&D"` |
-| `PROFILES` | `"creator"` | Print profiles: `"creator"` = the model creator's own, `"all"` = also the ones other users made (popular models can have dozens), `"none"` |
-| `IMAGES` | `1` | The model's pictures |
-| `DESCRIPTION` | `1` | `description.html` |
-| `EXTRACT` | `1` | Extract the model zip into `files/` (and delete the zip); `0` = keep the zip |
-| `DELAY_SECONDS` | `5` | Pause before each download link request |
-| `MAX_MODELS` | `0` (no limit) | Stop after this many models |
-| `RECHECK` | `0` | `1` = read every model again, e.g. to get print profiles added since (one request per model) |
-| `SKIP_DOWNLOADED` | `1` | Skip what's recorded as downloaded, even if you've deleted it since |
-| `DOWNLOAD` | `0`/`1` | `0` = only list what's missing (`mw_missing.txt`) |
+| `SOURCES` | `['collections', 'downloads', 'likes']` | What to download; remove what you don't want |
+| `COLLECTIONS` | `[]` (all) | Only these collections, e.g. `['Pokemon', 'D&D']` |
+| `PROFILES` | `'creator'` | Print profiles: `'creator'` = the model creator's own, `'all'` = also the ones other users made (popular models can have dozens), `'none'` |
+| `IMAGES` | `true` | The model's pictures |
+| `DESCRIPTION` | `true` | `description.html` |
+| `EXTRACT` | `true` | Extract the model zip into `files/`; `false` = keep the zip |
+| `DELAY_MS` | `15000` | Pause before each download link request (shorter = MakerWorld's "not a robot" check comes sooner) |
+| `MAX_MODELS` | `0` (all) | Stop after this many models |
+| `RECHECK` | `false` | `true` = read every model again, e.g. to get print profiles added since |
+
+Nothing is overwritten: a file that's already there is kept. A zip the script can't extract itself (very large "zip64" archives) is kept as a zip in `files/`.
 
 ## Deleting the files after importing
 
-You don't have to keep the downloads: everything is recorded in **`.mw_downloaded.tsv`** in your MakerWorld folder, and with `SKIP_DOWNLOADED=1` (the default) nothing recorded is downloaded again. **Keep that file.** To get a model again, delete its lines (they contain its id) and run again.
+You don't have to keep the downloads: everything is recorded in **`.mw_downloaded.tsv`** in your MakerWorld folder, and nothing recorded is downloaded again. **Keep that file.** To get a model again, delete its lines (they contain its id) and run again.
 
 ## Troubleshooting
 
 | Message | What to do |
 |---|---|
-| `MakerWorld says you're not logged in` | Your cookie expired - save a fresh `cookie.txt` |
-| `blocked by Cloudflare's bot check` | Make sure `user_agent.txt` matches the browser the cookie came from |
-| `HTTP 403: ...` for one model | MakerWorld refuses that model's download (e.g. removed, or paid and not bought) - listed in `mw_failed.txt`, tried again next run |
+| `MakerWorld says you are not logged in` | Log in on makerworld.com and run again |
+| `No permission to save in that folder` | Click the button again and allow "Edit files" |
+| `HTTP 403: ...` for one model | MakerWorld refuses that model's download (e.g. removed, or paid and not bought) - tried again next run |
+| `MakerWorld wants to confirm that you are not a robot` (HTTP 418) | MakerWorld's own check after a number of downloads. The script **pauses**: click the link in the panel (opens the model in a new tab), click **Download** there and complete the check, then click **Continue** in the panel - it retries the same file. If it comes up often, raise `DELAY_MS` |
+| Downloads refused after many models in one day | MakerWorld allows only a certain number of downloads **per day**. The script stops after 3 refusals; run it again the next day - it continues where it left off |
 | `Stopped early: 3 download links in a row were refused` | Probably a download limit; wait a while (a few hours) and run again |
-| `HTTP 429 - waiting ...` | MakerWorld asks to slow down; the script waits and continues (raise `DELAY_SECONDS` if it keeps happening) |
+| `HTTP 429 - waiting ...` | MakerWorld asks to slow down; the script waits and continues (raise `DELAY_MS` if it keeps happening) |
+| Linux script: `blocked by Cloudflare's bot check` | Expected on Linux - use the browser script |

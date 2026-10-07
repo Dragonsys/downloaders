@@ -1,6 +1,12 @@
 #!/bin/bash
 # ================================================================
-# MakerWorld downloader
+# MakerWorld downloader (Linux, curl) - OPTIONAL: use browser/1_mw_download.js instead.
+#
+# MakerWorld's Cloudflare bot check refuses Linux curl on the personal requests (your lists),
+# with or without a cookie (seen 2026-10-05; plain Windows curl was accepted). If that happens
+# ("blocked by Cloudflare's bot check"), use the browser script. Both use the same layout and
+# the same record file (.mw_downloaded.tsv), so you can switch between them.
+#
 # Reads your collections, your download history and your liked models on makerworld.com
 # (with your login cookie) and downloads every model into
 #   MW_DIR/<collection>/<creator>/<model>/
@@ -87,6 +93,21 @@ mkdir -p "$MW_DIR" 2>/dev/null; [[ -w "$MW_DIR" ]] || { echo -e "${RED}No write 
 [[ -z "$USER_AGENT" && -f "$script_dir/$USER_AGENT_FILE" ]] && USER_AGENT="$(tr -d '\r\n' < "$script_dir/$USER_AGENT_FILE")"
 COOKIE="${COOKIE#\"}"; COOKIE="${COOKIE%\"}"; USER_AGENT="${USER_AGENT#\"}"; USER_AGENT="${USER_AGENT%\"}"
 [[ -z "$COOKIE" ]] && { echo -e "${RED}No cookie set ($COOKIE_FILE next to the script, COOKIE, or MW_COOKIE).${NC}"; exit 1; }
+# Leave out Cloudflare's own cookies (cf_clearance, __cf_bm, _cfuvid, __cflb): they belong to the
+# browser they were issued to (its connection fingerprint), and sent by curl they make Cloudflare
+# challenge the request. MakerWorld's login cookies are separate and are kept.
+cf_dropped=""
+kept_cookie=""
+IFS=';' read -r -a cookie_parts <<< "$COOKIE"
+for cp in "${cookie_parts[@]}"; do
+    cp="${cp#"${cp%%[![:space:]]*}"}"; [[ -n "$cp" ]] || continue
+    case "${cp%%=*}" in
+        cf_clearance|__cf_bm|_cfuvid|__cflb|cf_chl_*) cf_dropped+="${cp%%=*} " ;;
+        *) kept_cookie+="${kept_cookie:+; }$cp" ;;
+    esac
+done
+COOKIE="$kept_cookie"
+[[ -n "$cf_dropped" ]] && printf "Cookie:      Cloudflare's own cookies are not sent (%s)\n" "${cf_dropped% }"
 [[ -z "$USER_AGENT" ]] && USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 # ---------- helpers ----------
