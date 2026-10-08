@@ -81,19 +81,33 @@
   log(`Saving into: ${root.name}`);
 
   // ---- files and folders in the chosen folder ----
+  // Titles can contain invisible characters (e.g. U+200D zero-width joiner at the start of
+  // "Voronoi Phoenix - Rise from the ashes!"), which the browser refuses in file names.
   const safeName = (s, max = 100) => {
-    s = String(s || '').replace(/[\u0000-\u001f]/g, '').replace(/[<>:"/\\|?*]/g, '_').replace(/^[\s.]+|[\s.]+$/g, '');
+    s = String(s || '').normalize('NFC')
+      .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u{FE0E}\u{FE0F}]/gu, '')   // control, zero-width, bidi marks
+      .replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
     if (s.length > max) s = s.slice(0, max).replace(/[\s.]+$/, '');
     return s;
   };
+  // if the browser still refuses a name ("Name is not allowed"), use a plainer one
+  const plainName = n => n.replace(/[^\p{L}\p{N} _.,()'&+#@!\[\]-]/gu, '_').replace(/^[\s.]+|[\s.]+$/g, '') || '_';
+  const getDir = async (d, part, create) => {
+    try { return await d.getDirectoryHandle(part, { create }); }
+    catch (e) { if (e.name !== 'TypeError' || plainName(part) === part) throw e; return d.getDirectoryHandle(plainName(part), { create }); }
+  };
+  const getFile = async (d, name, create) => {
+    try { return await d.getFileHandle(name, { create }); }
+    catch (e) { if (e.name !== 'TypeError' || plainName(name) === name) throw e; return d.getFileHandle(plainName(name), { create }); }
+  };
   const dirOf = async (rel, create = true) => {
     let d = root;
-    for (const part of rel.split('/').filter(Boolean)) d = await d.getDirectoryHandle(part, { create });
+    for (const part of rel.split('/').filter(Boolean)) d = await getDir(d, part, create);
     return d;
   };
   const exists = async (rel) => {
     const i = rel.lastIndexOf('/');
-    try { const d = await dirOf(rel.slice(0, i), false); await d.getFileHandle(rel.slice(i + 1)); return true; } catch (e) { return false; }
+    try { const d = await dirOf(rel.slice(0, i), false); await getFile(d, rel.slice(i + 1), false); return true; } catch (e) { return false; }
   };
   // Write a file; never overwrites (an existing file is kept, returns false). The browser writes
   // into its own temporary file (name.crswap) and renames it when done, so a half-written file
@@ -105,8 +119,8 @@
     for (let attempt = 1; ; attempt++) {
       try {
         const d = await dirOf(rel.slice(0, i));
-        try { await d.getFileHandle(name); return false; } catch (e) { if (e.name !== 'NotFoundError') throw e; }
-        const f = await d.getFileHandle(name, { create: true });
+        try { await getFile(d, name, false); return false; } catch (e) { if (e.name !== 'NotFoundError') throw e; }
+        const f = await getFile(d, name, true);
         const w = await f.createWritable();
         try { await w.write(data); await w.close(); }
         catch (e) { try { await w.abort(); } catch (e2) {} throw e; }
@@ -115,7 +129,7 @@
         if (attempt >= 3 || !/InvalidStateError|NotReadableError|InvalidModificationError/.test(e.name)) throw e;
         await sleep(1500 * attempt);
         // a file left behind by the failed attempt is removed before the next try
-        try { const d = await dirOf(rel.slice(0, i)); if ((await (await d.getFileHandle(name)).getFile()).size !== data.size) await d.removeEntry(name); } catch (e2) {}
+        try { const d = await dirOf(rel.slice(0, i)); if ((await (await getFile(d, name, false)).getFile()).size !== data.size) await d.removeEntry(name).catch(() => d.removeEntry(plainName(name))); } catch (e2) {}
       }
     }
   };
