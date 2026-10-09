@@ -42,8 +42,11 @@ $MAX_NAME_LENGTH = 80
 $DRY_RUN = $true
 # ============================================================================
 
-if (-not $JSON_PATH)    { $JSON_PATH    = Join-Path $PSScriptRoot 'downloads' }
-if (-not $FOLDERS_PATH) { $FOLDERS_PATH = Join-Path $PSScriptRoot 'models' }
+# The script's folder; when the script is pasted into the console instead of run as a file there
+# is none, so the current folder (the one shown in the prompt) is used.
+$SCRIPT_DIR = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $JSON_PATH)    { $JSON_PATH    = Join-Path $SCRIPT_DIR 'downloads' }
+if (-not $FOLDERS_PATH) { $FOLDERS_PATH = Join-Path $SCRIPT_DIR 'models' }
 
 $STRUCTURES = @('DESIGNER\ID_NAME', 'DESIGNER\NAME', 'ID_NAME', 'NAME')
 $structure = ([string]$FOLDER_STRUCTURE).Trim().Replace('/', '\').ToUpperInvariant()
@@ -99,6 +102,9 @@ $jsonFiles = @(Get-ChildItem -LiteralPath $JSON_PATH -Filter "model_*.json" -Fil
 $total = $jsonFiles.Count
 if ($total -eq 0) { Write-Host "ERROR: No model_*.json files found in $JSON_PATH" -ForegroundColor Red; exit 1 }
 
+Write-Host "Model folders in: $FOLDERS_PATH"
+Write-Host "JSON files in:    $JSON_PATH"
+Write-Host "Structure:        $structure"
 Write-Host "Found $total JSON files" -ForegroundColor Green
 $ids = @{}
 foreach ($jf in $jsonFiles) { $ids[($jf.BaseName -replace '^model_', '')] = $true }
@@ -234,7 +240,7 @@ foreach ($dir in $leftDirs.Keys) {
 }
 
 if ($log.Count -gt 0) {
-    $logFile = Join-Path $PSScriptRoot "rename_log.csv"
+    $logFile = Join-Path $SCRIPT_DIR "rename_log.csv"
     $log | Export-Csv -LiteralPath $logFile -NoTypeInformation -Append -Encoding UTF8
 }
 
@@ -250,5 +256,5 @@ Write-Host ("{0,-26}{1}" -f "Name conflicts:", $conflicts) -ForegroundColor $(if
 Write-Host ("{0,-26}{1}" -f "No usable name:", $noName) -ForegroundColor $(if ($noName) { 'Yellow' } else { 'Gray' })
 Write-Host ("{0,-26}{1}" -f "Failed:", $failed) -ForegroundColor $(if ($failed) { 'Red' } else { 'Gray' })
 if ($removedDirs) { Write-Host ("{0,-26}{1}" -f "Empty folders removed:", $removedDirs) -ForegroundColor Gray }
-if (-not $DRY_RUN -and $log.Count -gt 0) { Write-Host "Renames logged to: $(Join-Path $PSScriptRoot 'rename_log.csv')" -ForegroundColor Gray }
+if (-not $DRY_RUN -and $log.Count -gt 0) { Write-Host "Renames logged to: $(Join-Path $SCRIPT_DIR 'rename_log.csv')" -ForegroundColor Gray }
 if ($DRY_RUN) { Write-Host ""; Write-Host "Set `$DRY_RUN = `$false to apply these changes." -ForegroundColor Yellow }

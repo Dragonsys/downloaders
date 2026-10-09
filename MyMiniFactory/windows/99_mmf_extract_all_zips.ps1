@@ -28,7 +28,10 @@ $EXTRACT_IN_PLACE = $false
 $SEVEN_ZIP = "C:\Program Files\7-Zip\7z.exe"
 # ============================================================================
 
-if (-not $BASE_PATH) { $BASE_PATH = Join-Path $PSScriptRoot 'models' }
+# The script's folder; when the script is pasted into the console instead of run as a file there
+# is none, so the current folder (the one shown in the prompt) is used.
+$SCRIPT_DIR = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $BASE_PATH) { $BASE_PATH = Join-Path $SCRIPT_DIR 'models' }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -138,7 +141,7 @@ foreach ($archive in $archives) {
     }
 }
 
-$failedFile = Join-Path $PSScriptRoot "failed_archives.txt"
+$failedFile = Join-Path $SCRIPT_DIR "failed_archives.txt"
 Remove-Item -LiteralPath $failedFile -Force -ErrorAction SilentlyContinue
 if ($failedList.Count -gt 0) { $failedList | Set-Content -LiteralPath $failedFile -Encoding UTF8 }
 

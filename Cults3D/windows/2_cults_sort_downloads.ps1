@@ -38,7 +38,10 @@ $DRY_RUN    = $true       # $true = only show what would happen
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-if (-not $CULTS_PATH) { $CULTS_PATH = $PSScriptRoot }
+# The script's folder; when the script is pasted into the console instead of run as a file there
+# is none, so the current folder (the one shown in the prompt) is used.
+$SCRIPT_DIR = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $CULTS_PATH) { $CULTS_PATH = $SCRIPT_DIR }
 if (-not $DOWN_PATH) {
     $DOWN_PATH = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders').'{374DE290-123F-4565-9164-39C4925E467B}'
     if ($DOWN_PATH) { $DOWN_PATH = [Environment]::ExpandEnvironmentVariables($DOWN_PATH) } else { $DOWN_PATH = Join-Path $env:USERPROFILE 'Downloads' }
@@ -58,7 +61,7 @@ if ($DRY_RUN) { Write-Host "DRY RUN - nothing is changed (set `$DRY_RUN = `$fals
 
 if (-not $LIST_FILE) {
     $cand = @()
-    foreach ($d in @($DOWN_PATH, $PSScriptRoot)) { if (Test-Path -LiteralPath $d) { $cand += Get-ChildItem -LiteralPath $d -File -Filter 'cults_list*.json' } }
+    foreach ($d in @($DOWN_PATH, $SCRIPT_DIR)) { if (Test-Path -LiteralPath $d) { $cand += Get-ChildItem -LiteralPath $d -File -Filter 'cults_list*.json' } }
     $LIST_FILE = ($cand | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 if (-not $LIST_FILE -or -not (Test-Path -LiteralPath $LIST_FILE)) { Write-Host "cults_list.json not found - run 1_cults_collect_and_download.js first." -ForegroundColor Red; exit 1 }
@@ -234,7 +237,7 @@ if (-not $DRY_RUN) {
         "// gear icon at the top right of the Console, tick `"Hide network`" and `"Selected context only`".`n" +
         "localStorage.setItem('cultsDone', JSON.stringify(" + (ConvertTo-Json -InputObject $keys -Compress) + "));`n" +
         "'$($keys.Count) models marked as done.'`n"
-    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'cults_done.js'), $js, (New-Object Text.UTF8Encoding $false))
+    [IO.File]::WriteAllText((Join-Path $SCRIPT_DIR 'cults_done.js'), $js, (New-Object Text.UTF8Encoding $false))
 }
 
 $unused = @($downloads | Where-Object { -not $_.Used -and $_.File.Extension -in '.zip', '.stl', '.3mf', '.obj', '.7z', '.rar' })

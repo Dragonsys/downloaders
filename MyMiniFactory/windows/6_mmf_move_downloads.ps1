@@ -29,8 +29,11 @@ $DRY_RUN = $true
 # ============================================================================
 
 if (-not $DOWN_PATH)   { $DOWN_PATH   = Join-Path $HOME 'Downloads\www.myminifactory.com\download' }
-if (-not $MODELS_PATH) { $MODELS_PATH = Join-Path $PSScriptRoot 'models' }
-if (-not $JSON_PATH)   { $JSON_PATH   = Join-Path $PSScriptRoot 'downloads' }
+# The script's folder; when the script is pasted into the console instead of run as a file there
+# is none, so the current folder (the one shown in the prompt) is used.
+$SCRIPT_DIR = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $MODELS_PATH) { $MODELS_PATH = Join-Path $SCRIPT_DIR 'models' }
+if (-not $JSON_PATH)   { $JSON_PATH   = Join-Path $SCRIPT_DIR 'downloads' }
 
 $JUNK_FILES   = @('Thumbs.db', 'desktop.ini', '.DS_Store')
 $PARTIAL_EXTS = @('.crdownload', '.part', '.partial', '.tmp', '.download')
@@ -191,7 +194,7 @@ if (-not $DRY_RUN) {
 }
 
 # Save a list of everything that needs attention (replacing any old list)
-$logFile = Join-Path $PSScriptRoot "move_problems.txt"
+$logFile = Join-Path $SCRIPT_DIR "move_problems.txt"
 Remove-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
 if ($problems.Count -gt 0) { $problems | Set-Content -LiteralPath $logFile -Encoding UTF8 }
 

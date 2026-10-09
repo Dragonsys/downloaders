@@ -23,7 +23,10 @@ $DRY_RUN = $true
 # ============================================================================
 
 if (-not $DOWN_PATH) { $DOWN_PATH = Join-Path $HOME 'Downloads\www.myminifactory.com\download' }
-if (-not $JSON_PATH) { $JSON_PATH = Join-Path $PSScriptRoot 'downloads' }
+# The script's folder; when the script is pasted into the console instead of run as a file there
+# is none, so the current folder (the one shown in the prompt) is used.
+$SCRIPT_DIR = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $JSON_PATH) { $JSON_PATH = Join-Path $SCRIPT_DIR 'downloads' }
 
 $JUNK_FILES   = @('Thumbs.db', 'desktop.ini', '.DS_Store')
 $PARTIAL_EXTS = @('.crdownload', '.part', '.partial', '.tmp', '.download')
