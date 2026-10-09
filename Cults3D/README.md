@@ -70,6 +70,7 @@ It starts as a **dry run** and only lists which download goes where. If that loo
 | `$CULTS_PATH` | empty (the script's folder) | Where the models go |
 | `$DOWN_PATH` | empty (your Windows Downloads folder) | Where the browser saved the downloads |
 | `$LIST_FILE` | empty | `cults_list.json`; empty = the newest one in the Downloads folder or next to the script |
+| `$FOLDER_STRUCTURE` | `'CREATOR\MODEL'` | How the folders are arranged - the options are listed in the script: `'CREATOR\MODEL'` (`Byzantium3D\Rugged Desktop Organizer\`) or `'MODEL'` (`Rugged Desktop Organizer\`). Applies to models sorted after a change |
 | `$EXTRACT` | `$true` | Extract zips into `files\`; `$false` = keep the zip |
 | `$IMAGES` | `$true` | Fetch the pictures |
 | `$DELETE_DOWNLOADS` | `$true` | Remove a download from the Downloads folder once it's sorted |

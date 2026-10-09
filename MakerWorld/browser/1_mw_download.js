@@ -3,7 +3,7 @@
 // Run in the browser Console (F12) on https://makerworld.com while logged in (Chrome or Edge).
 // A panel appears at the bottom right: click "Choose folder" and pick your MakerWorld folder;
 // the browser asks once whether the page may save files there - allow it ("Edit files").
-// Every model goes to <collection>/<creator>/<model>/ with images/, files/ (the model files,
+// Every model goes to <collection>/<creator>/<model>/ (FOLDER_STRUCTURE) with images/, files/ (the model files,
 // extracted), profiles/ (print profiles, .3mf) and description.html. What's finished is recorded
 // in .mw_downloaded.tsv in that folder, so the next run only downloads what's new.
 // Each download link request counts as a download on MakerWorld, like clicking Download.
@@ -23,10 +23,22 @@
   const MAX_MODELS  = 0;         // stop after this many models with something to download (0 = all); 2 for a first test
   const RECHECK     = false;     // true = read every model again (finds print profiles added since)
   const REFUSAL_LIMIT = 3;       // stop after this many refused download links in a row
+  // Folder structure - available options:
+  //   'COLLECTION/CREATOR/MODEL'  -> Pokemon/Ghosty/Gengar Puzzle Box/   (default)
+  //   'COLLECTION/MODEL'          -> Pokemon/Gengar Puzzle Box/
+  //   'CREATOR/MODEL'             -> Ghosty/Gengar Puzzle Box/
+  //   'MODEL'                     -> Gengar Puzzle Box/
+  // (COLLECTION = the collection, or Downloads / Likes for models in no collection.) Each model folder
+  // holds images/, files/, profiles/ and description.html. A model's folder is recorded when it's first
+  // downloaded, so a change only applies to models downloaded after it.
+  const FOLDER_STRUCTURE = 'COLLECTION/CREATOR/MODEL';
   // ====================
 
   if (location.hostname !== 'makerworld.com') return 'Open makerworld.com (logged in) first.';
   if (typeof window.showDirectoryPicker !== 'function') return 'This browser cannot save into a folder - use Chrome or Edge.';
+  const STRUCTURES = ['COLLECTION/CREATOR/MODEL', 'COLLECTION/MODEL', 'CREATOR/MODEL', 'MODEL'];
+  const structure = String(FOLDER_STRUCTURE).trim().toUpperCase().replace(/\\/g, '/');
+  if (!STRUCTURES.includes(structure)) return `Unknown FOLDER_STRUCTURE '${FOLDER_STRUCTURE}' - use one of: ${STRUCTURES.join(', ')}`;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const API = '/api/v1/design-service';
 
@@ -287,7 +299,8 @@
     if (!RECHECK && done('complete:' + id)) { log(`  ✓ ${label}`); continue; }
     let rel = ledger['dir:' + id];
     if (!rel) {
-      rel = `${safeName(m.src)}/${safeName(m.creator) || 'Unknown creator'}/${safeName(m.title) || 'Model ' + id}`;
+      const part = { COLLECTION: safeName(m.src), CREATOR: safeName(m.creator) || 'Unknown creator', MODEL: safeName(m.title) || 'Model ' + id };
+      rel = structure.split('/').map(p => part[p]).join('/');
       if (dirOwner[rel] && dirOwner[rel] !== id) rel += ` (${id})`;
     }
     try {

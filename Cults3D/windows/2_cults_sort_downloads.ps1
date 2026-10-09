@@ -1,4 +1,4 @@
-# Cults3D - Step 2: sort the browser downloads into <creator>\<model>\
+# Cults3D - Step 2: sort the browser downloads into <creator>\<model>\ (see $FOLDER_STRUCTURE)
 #
 # 1_cults_collect_and_download.js saved cults_list.json and made the browser download every
 # model into your Downloads folder. This script recognises each download by its CONTENTS (the
@@ -22,6 +22,12 @@
 $CULTS_PATH = ''          # where the models go; empty = the folder this script is in
 $DOWN_PATH  = ''          # where the browser saved the downloads; empty = your Windows Downloads folder
 $LIST_FILE  = ''          # cults_list.json; empty = the newest cults_list*.json in $DOWN_PATH or next to this script
+# Folder structure - available options:
+#   "CREATOR\MODEL"  -> Byzantium3D\Rugged Desktop Organizer\   (default)
+#   "MODEL"          -> Rugged Desktop Organizer\
+# Each model folder holds files\, images\ and description.html. Only models sorted after a change
+# use the new structure; models sorted before stay where they are.
+$FOLDER_STRUCTURE = 'CREATOR\MODEL'
 $EXTRACT    = $true       # $true = extract zips into files\ ; $false = move the zip into files\
 $IMAGES     = $true       # fetch the pictures
 $DESCRIPTION = $true      # write description.html
@@ -38,6 +44,12 @@ if (-not $DOWN_PATH) {
     if ($DOWN_PATH) { $DOWN_PATH = [Environment]::ExpandEnvironmentVariables($DOWN_PATH) } else { $DOWN_PATH = Join-Path $env:USERPROFILE 'Downloads' }
 }
 $LEDGER = Join-Path $CULTS_PATH '.cults_downloaded.tsv'
+$STRUCTURES = @('CREATOR\MODEL', 'MODEL')
+$structure = ([string]$FOLDER_STRUCTURE).Trim().Replace('/', '\').ToUpperInvariant()
+if ($STRUCTURES -notcontains $structure) {
+    Write-Host "Unknown `$FOLDER_STRUCTURE '$FOLDER_STRUCTURE' - use one of: $($STRUCTURES -join ', ')" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "Cults3D - sort downloads" -ForegroundColor Cyan
 Write-Host "Models go to: $CULTS_PATH"
@@ -152,7 +164,8 @@ foreach ($k in $ledger.Keys) { $owner[$ledger[$k]] = $k }
 
 foreach ($m in $models) {
     if ($ledger.ContainsKey($m.key)) { continue }
-    $rel = (Safe-Name $(if ($m.creator) { $m.creator } else { 'Unknown creator' })) + '\' + (Safe-Name $m.title)
+    $rel = Safe-Name $m.title
+    if ($structure -eq 'CREATOR\MODEL') { $rel = (Safe-Name $(if ($m.creator) { $m.creator } else { 'Unknown creator' })) + '\' + $rel }
     if ($owner.ContainsKey($rel) -and $owner[$rel] -ne $m.key) { $rel = "$rel ($($m.creation))" }
     $dir = Join-Path $CULTS_PATH $rel
     $hits = @(Find-Downloads $m)

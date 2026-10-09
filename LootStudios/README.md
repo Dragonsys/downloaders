@@ -56,7 +56,7 @@ It works in two halves:
    | Setting | Default | Meaning |
    |---|---|---|
    | `LOOT_DIR` | empty (the script's folder) | Where the bundles are stored; put a full path here to use another folder |
-   | `ORGANIZE` | `"folder"` | `"folder"` → `FaewoodHaven/All_FaewoodHaven_Bust.zip`; `"bundle"` → `Faewood Haven/...` |
+   | `FOLDER_STRUCTURE` | `"BUNDLE_FOLDER"` | How the bundle folders are named - the options are listed in the script: `"BUNDLE_FOLDER"` → `FaewoodHaven/All_FaewoodHaven_Bust.zip` (name from the download link); `"BUNDLE_TITLE"` → `Faewood Haven/...` (title on the site). Set the same in `99_loot_fix_folders.sh`, which moves existing bundles over |
    | `MATERIALS` | empty (all) | e.g. `"resin"` to skip FDM versions |
    | `SCALES` | empty (all) | e.g. `"32mm bust"` to skip 75mm (scales on the site: `32mm`, `75mm`, `bust`, `other`) |
    | `INDIVIDUAL` | `1` | Individual figure files where there's no All Bundle archive; `0` = All Bundle archives only |
@@ -264,6 +264,8 @@ A bundle's folder is named after its download links, and Loot Studios has change
 
    It starts as a **dry run** and only shows what it would move (`FreeMini/All_AedanValiantShield_32mm.zip => AedanValiantShield/All_AedanValiantShield_32mm.zip`).
 3. If that looks right, open the script, set `DRY_RUN=0`, and run it again. It moves the files, updates their paths in `.loot_downloaded.tsv` (the old one is kept as `.loot_downloaded.tsv.bak`), and removes old folders once they're empty.
+
+Set `FOLDER_STRUCTURE` in it the same as in the downloader. To switch an existing collection from one structure to the other, change it in both and run this script: it moves every bundle to its new folder name.
 
 Files you've already extracted and deleted are only updated in `.loot_downloaded.tsv`. If two bundles have an archive with the **same name** (e.g. `All_32mm.zip`) in a shared folder, they overwrote each other; the script leaves that file alone and lists it - delete it and its lines in `.loot_downloaded.tsv` to download both again. Running the script again is harmless.
 

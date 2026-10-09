@@ -45,6 +45,15 @@ PROFILES="creator"    # print profiles: "creator" = the model creator's own, "al
 IMAGES=1              # 1 = the model's pictures
 DESCRIPTION=1         # 1 = description.html
 EXTRACT=1             # 1 = extract the model zip into files/ (and delete the zip); 0 = keep the zip
+# Folder structure - available options:
+#   "COLLECTION/CREATOR/MODEL"  -> Pokemon/Ghosty/Gengar Puzzle Box/   (default)
+#   "COLLECTION/MODEL"          -> Pokemon/Gengar Puzzle Box/
+#   "CREATOR/MODEL"             -> Ghosty/Gengar Puzzle Box/
+#   "MODEL"                     -> Gengar Puzzle Box/
+# (COLLECTION = the collection, or Downloads / Likes for models in no collection.) Use the same as in
+# the browser script. A model's folder is recorded when it's first downloaded, so a change only
+# applies to models downloaded after it.
+FOLDER_STRUCTURE="COLLECTION/CREATOR/MODEL"
 
 # Cookie and user agent: leave empty to use cookie.txt / user_agent.txt next to this script
 # (from makerworld.com), or set the MW_COOKIE / MW_USER_AGENT environment variables.
@@ -74,6 +83,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$MW_DIR" ]] && MW_DIR="$script_dir"
 [[ "$MW_DIR" != /* ]] && MW_DIR="$script_dir/$MW_DIR"
 MW_DIR="${MW_DIR%/}"
+FOLDER_STRUCTURE="${FOLDER_STRUCTURE^^}"; FOLDER_STRUCTURE="${FOLDER_STRUCTURE//\\//}"
+case "$FOLDER_STRUCTURE" in
+    COLLECTION/CREATOR/MODEL|COLLECTION/MODEL|CREATOR/MODEL|MODEL) ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"$FOLDER_STRUCTURE\" - use COLLECTION/CREATOR/MODEL, COLLECTION/MODEL, CREATOR/MODEL or MODEL.${NC}"; exit 1 ;;
+esac
 LEDGER="$MW_DIR/.mw_downloaded.tsv"     # key <TAB> value <TAB> date
 FAILED_OUT="mw_failed.txt"
 MISSING_OUT="mw_missing.txt"
@@ -300,7 +314,16 @@ for id in "${order[@]}"; do
     rel="${ledger[dir:$id]}"
     if [[ -z "$rel" ]]; then
         c="$(safe_name "${creator[$id]}")"; t="$(safe_name "${title[$id]}")"
-        rel="$(safe_name "${src[$id]}")/${c:-Unknown creator}/${t:-Model $id}"
+        rel=""
+        IFS=/ read -r -a parts <<< "$FOLDER_STRUCTURE"
+        for p in "${parts[@]}"; do
+            case "$p" in
+                COLLECTION) v="$(safe_name "${src[$id]}")" ;;
+                CREATOR)    v="${c:-Unknown creator}" ;;
+                MODEL)      v="${t:-Model $id}" ;;
+            esac
+            rel+="${rel:+/}$v"
+        done
         [[ -n "${dir_owner[$rel]}" && "${dir_owner[$rel]}" != "$id" ]] && rel="$rel ($id)"
     fi
     dir="$MW_DIR/$rel"

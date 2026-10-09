@@ -57,7 +57,7 @@ Columns: `collection`, `post`, `label`, `name`, `id`, `url`, `post_url`, `kind` 
    | Setting | Default | Meaning |
    |---|---|---|
    | `HI_DIR` | empty (the script's folder) | Where the files are stored; put a full path here to use another folder |
-   | `ORGANIZE` | `"collection_post"` | `HI_DIR/<collection>/<post>/<file>`; `"collection"` puts all of a collection's files in one folder |
+   | `FOLDER_STRUCTURE` | `"COLLECTION/POST"` | How the folders are arranged - the options are listed in the script: `"COLLECTION/POST"` → `HI_DIR/<collection>/<post>/<file>`; `"COLLECTION"` puts all of a collection's files in one folder. `99_hi_extract_all.sh` sorts by `"COLLECTION/POST"` |
    | `DELAY_SECONDS` | `5` | Pause between files |
    | `MAX_DOWNLOADS` | `0` (no limit) | Set to `2` for your first test |
    | `IMAGES` | `1` | Pictures (collection covers, post pictures); `0` = files only |

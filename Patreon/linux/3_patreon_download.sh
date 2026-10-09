@@ -26,6 +26,13 @@ LIST_FILES="patreon_list*.tsv"   # exported lists (next to this script); one per
 # To use another folder, put its full path here, e.g. "/mnt/nas/3DPrints/Patreon".
 PATREON_DIR=""
 CREATORS=""           # only these creators, e.g. "eXoDus" (separate several with |); empty = all
+# Folder structure - available options:
+#   "CREATOR/POST"       -> eXoDus/2026-09-14 - Orc Warband/<file>   (default)
+#   "CREATOR/YEAR/POST"  -> eXoDus/2026/2026-09-14 - Orc Warband/<file>
+#   "CREATOR"            -> eXoDus/<file>   (all of a creator's files together)
+# (POST = "<date> - <post title>".) Each file's place is recorded when it's downloaded, so a change
+# only applies to files downloaded after it.
+FOLDER_STRUCTURE="CREATOR/POST"
 
 # Every finished file is recorded in PATREON_DIR/.patreon_downloaded.tsv (keep that file!).
 SKIP_DOWNLOADED=1     # 1 = skip files recorded as downloaded, even if you've since extracted
@@ -48,6 +55,11 @@ USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Geck
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$PATREON_DIR" ]] && PATREON_DIR="$script_dir"
 [[ "$PATREON_DIR" != /* ]] && PATREON_DIR="$script_dir/$PATREON_DIR"
+FOLDER_STRUCTURE="${FOLDER_STRUCTURE^^}"; FOLDER_STRUCTURE="${FOLDER_STRUCTURE//\\//}"
+case "$FOLDER_STRUCTURE" in
+    CREATOR/POST|CREATOR/YEAR/POST|CREATOR) ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"$FOLDER_STRUCTURE\" - use CREATOR/POST, CREATOR/YEAR/POST or CREATOR.${NC}"; exit 1 ;;
+esac
 PATREON_DIR="${PATREON_DIR%/}"
 LEDGER="$PATREON_DIR/.patreon_downloaded.tsv"   # id <TAB> path relative to PATREON_DIR <TAB> date
 MISSING_OUT="patreon_missing.tsv"
@@ -199,7 +211,11 @@ for id in "${ids[@]}"; do
     IFS=$'\x1f' read -r creator post published kind name _ size url post_url <<< "${row[$id]}"
     if [[ -n "$CREATORS" ]] && ! [[ "|${CREATORS,,}|" == *"|${creator,,}|"* ]]; then ((filtered++)); continue; fi
     pdir="$(safe_name "${published:+$published - }$post")"; [[ -z "$pdir" ]] && pdir="Post"
-    reldir="$(safe_name "$creator")/$pdir"
+    case "$FOLDER_STRUCTURE" in
+        CREATOR/POST)      reldir="$(safe_name "$creator")/$pdir" ;;
+        CREATOR/YEAR/POST) reldir="$(safe_name "$creator")/${published:0:4}${published:+/}$pdir" ;;
+        CREATOR)           reldir="$(safe_name "$creator")" ;;
+    esac
     what="$creator - ${post:0:60} - $name"
 
     # Links in the post text and older attachments: listed, not downloaded

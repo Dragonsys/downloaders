@@ -61,6 +61,7 @@ For a first test, set `MAX_MODELS = 2` at the top of the script. Settings:
 | `IMAGES` | `true` | The model's pictures |
 | `DESCRIPTION` | `true` | `description.html` |
 | `EXTRACT` | `true` | Extract the model zip into `files/`; `false` = keep the zip |
+| `FOLDER_STRUCTURE` | `'COLLECTION/CREATOR/MODEL'` | How the folders are arranged - the options are listed in the script: `'COLLECTION/CREATOR/MODEL'`, `'COLLECTION/MODEL'`, `'CREATOR/MODEL'`, `'MODEL'`. A model's folder is recorded when it's first downloaded, so a change only applies to models downloaded after it |
 | `DELAY_MS` | `15000` | Pause before each download link request (shorter = MakerWorld's "not a robot" check comes sooner) |
 | `MAX_MODELS` | `0` (all) | Stop after this many models |
 | `RECHECK` | `false` | `true` = read every model again, e.g. to get print profiles added since |

@@ -90,6 +90,7 @@ It reads every `patreon_list*.tsv`, downloads each file into `<creator>/<date> -
 |---|---|---|
 | `PATREON_DIR` | empty (the script's folder) | Where the creator folders go |
 | `CREATORS` | empty (all) | Only these creators, e.g. `"eXoDus"` (several: `"eXoDus|Other Creator"`) |
+| `FOLDER_STRUCTURE` | `"CREATOR/POST"` | How the folders are arranged - the options are listed in the script: `"CREATOR/POST"` (`eXoDus/2026-09-14 - Orc Warband/`), `"CREATOR/YEAR/POST"` (`eXoDus/2026/2026-09-14 - Orc Warband/`), `"CREATOR"` (all of a creator's files together). Applies to files downloaded after a change |
 | `DELAY_SECONDS` | `3` | Pause between files |
 | `MAX_DOWNLOADS` | `0` (no limit) | Stop after this many downloads |
 | `SKIP_DOWNLOADED` | `1` | Skip files recorded as downloaded, even if you've deleted them since |

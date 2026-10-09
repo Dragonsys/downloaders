@@ -24,10 +24,13 @@ LIST_FILE="hi_downloads.tsv"                   # exported list (next to this scr
 # To use another folder, put its full path here, e.g. "/mnt/nas/HeroesInfinite".
 HI_DIR=""
 
-# Folder layout:
-#   "collection_post" -> HI_DIR/<collection>/<post>/<file>   (recommended)
-#   "collection"      -> HI_DIR/<collection>/<file>
-ORGANIZE="collection_post"
+# Folder structure - available options:
+#   "COLLECTION/POST" -> Undead Legion/Vampires/STL_Count_Vlad_SUPPORTED.zip   (default, recommended)
+#   "COLLECTION"      -> Undead Legion/STL_Count_Vlad_SUPPORTED.zip             (all of a collection's files together)
+# (Pictures go to <post>/Images/, or Images/ for "COLLECTION".) Each file's place is recorded when it's
+# downloaded, so a change only applies to files downloaded after it. 99_hi_extract_all.sh sorts
+# by the "COLLECTION/POST" layout (post = group).
+FOLDER_STRUCTURE="COLLECTION/POST"
 
 # Cookie and user agent: leave empty to use cookie.txt / user_agent.txt next to
 # this script (from heroesinfinite.com, NOT MyMiniFactory), or set the
@@ -62,13 +65,18 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$LIST_FILE" != /* && ! -f "$LIST_FILE" && -f "$script_dir/$LIST_FILE" ]] && LIST_FILE="$script_dir/$LIST_FILE"
 [[ -z "$HI_DIR" ]] && HI_DIR="$script_dir"
 HI_DIR="${HI_DIR%/}"
+FOLDER_STRUCTURE="${FOLDER_STRUCTURE^^}"; FOLDER_STRUCTURE="${FOLDER_STRUCTURE//\\//}"
+case "$FOLDER_STRUCTURE" in
+    COLLECTION/POST|COLLECTION) ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"$FOLDER_STRUCTURE\" - use COLLECTION/POST or COLLECTION.${NC}"; exit 1 ;;
+esac
 LEDGER="$HI_DIR/.hi_downloaded.tsv"     # record of which download id became which file
 MISSING_OUT="hi_missing.tsv"
 FAILED_OUT="hi_failed.txt"
 
 echo -e "${BLUE}Heroes Infinite downloader${NC}"
 printf "List file:   ${YELLOW}%s${NC}\n" "$LIST_FILE"
-printf "Destination: ${YELLOW}%s${NC} (layout: %s)\n" "$HI_DIR" "$ORGANIZE"
+printf "Destination: ${YELLOW}%s${NC} (folder structure %s)\n" "$HI_DIR" "$FOLDER_STRUCTURE"
 if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
     printf "Mode:        ${YELLOW}record everything in the list as downloaded (nothing is downloaded)${NC}\n"
     DOWNLOAD=0   # no cookie needed
@@ -313,7 +321,7 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
 
     cdir="$(safe_name "$collection")"; [[ -z "$cdir" ]] && cdir="Unknown collection"
     pdir="$(safe_name "$post")"; [[ -z "$pdir" ]] && pdir="Post"
-    if [[ "$ORGANIZE" == "collection" ]]; then reldir="$cdir"; else reldir="$cdir/$pdir"; fi
+    if [[ "$FOLDER_STRUCTURE" == "COLLECTION" ]]; then reldir="$cdir"; else reldir="$cdir/$pdir"; fi
     what="$collection - ${post:+$post - }${label:-$id}"
     # Pictures: covers next to the collection's posts, post pictures in an Images subfolder
     if [[ "$kind" == "cover" ]]; then reldir="$cdir"; what="$collection - cover picture"; fi

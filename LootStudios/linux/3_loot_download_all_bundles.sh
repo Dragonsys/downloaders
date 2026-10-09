@@ -25,10 +25,13 @@ LIST_FILE="loot_all_bundles.tsv"            # exported list (next to this script
 # To use another folder, put its full path here, e.g. "/mnt/nas/LootStudios".
 LOOT_DIR=""
 
-# Folder layout:
-#   "folder" -> LOOT_DIR/FaewoodHaven/All_FaewoodHaven_Bust.zip   (name from the download link)
-#   "bundle" -> LOOT_DIR/Faewood Haven/All_FaewoodHaven_Bust.zip  (bundle title from the site)
-ORGANIZE="folder"
+# Folder structure - available options:
+#   "BUNDLE_FOLDER" -> FaewoodHaven/All_FaewoodHaven_Bust.zip    (default; bundle name from the download link)
+#   "BUNDLE_TITLE"  -> Faewood Haven/All_FaewoodHaven_Bust.zip   (bundle title as shown on the site)
+# Inside the bundle folder it's the same for both: single figure files in <group>/, pictures in
+# Images/<group>/. Files already downloaded are found under either name, so changing it causes no
+# re-downloads (it doesn't move them, though). Use the same setting in 99_loot_fix_folders.sh.
+FOLDER_STRUCTURE="BUNDLE_FOLDER"
 
 MATERIALS=""          # only these materials, e.g. "resin" or "resin fdm"; empty = all
 SCALES=""             # only these scales, e.g. "32mm bust"; empty = all
@@ -68,6 +71,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$LIST_FILE" != /* && ! -f "$LIST_FILE" && -f "$script_dir/$LIST_FILE" ]] && LIST_FILE="$script_dir/$LIST_FILE"
 [[ -z "$LOOT_DIR" ]] && LOOT_DIR="$script_dir"
 LOOT_DIR="${LOOT_DIR%/}"
+FOLDER_STRUCTURE="${FOLDER_STRUCTURE^^}"
+case "$FOLDER_STRUCTURE" in
+    BUNDLE_FOLDER|BUNDLE_TITLE) ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"$FOLDER_STRUCTURE\" - use BUNDLE_FOLDER or BUNDLE_TITLE.${NC}"; exit 1 ;;
+esac
 
 LEDGER="$LOOT_DIR/.loot_downloaded.tsv"   # record of finished files (key, path, date)
 UNAVAILABLE="$LOOT_DIR/.loot_unavailable.tsv"   # files the site doesn't have (key, unix time, reason)
@@ -78,7 +86,7 @@ DONE_JS="loot_done_bundles.js"     # paste into the Console so the collector ski
 
 echo -e "${BLUE}Loot Studios downloader${NC}"
 printf "List file:   ${YELLOW}%s${NC}\n" "$LIST_FILE"
-printf "Destination: ${YELLOW}%s${NC} (organized by %s)\n" "$LOOT_DIR" "$ORGANIZE"
+printf "Destination: ${YELLOW}%s${NC} (folder structure %s)\n" "$LOOT_DIR" "$FOLDER_STRUCTURE"
 if [[ $MARK_ALL_DOWNLOADED -eq 1 ]]; then
     printf "Mode:        ${YELLOW}record everything in the list as downloaded (nothing is downloaded)${NC}\n"
 elif [[ $DOWNLOAD -eq 1 ]]; then
@@ -231,7 +239,7 @@ parse_row() {
     item="${f[${col[item]:-99}]}"
     variant="${f[${col[variant]:-99}]}"
     [[ -z "$file" || ! "$url" =~ ^https?:// ]] && return
-    if [[ "$ORGANIZE" == "bundle" || -z "$folder" ]]; then dir="$(safe_name "$bundle")"; else dir="$(safe_name "$folder")"; fi
+    if [[ "$FOLDER_STRUCTURE" == "BUNDLE_TITLE" || -z "$folder" ]]; then dir="$(safe_name "$bundle")"; else dir="$(safe_name "$folder")"; fi
     [[ -z "$dir" ]] && dir="Unknown bundle"
     # Inside the bundle folder: All Bundle archives and extras at the top, figures per group
     inner="$(safe_name "$file")"
@@ -357,7 +365,7 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
         continue
     fi
     # Also accept the file in this bundle's other possible folder (the other
-    # ORGANIZE setting), so changing ORGANIZE doesn't cause re-downloads.
+    # FOLDER_STRUCTURE setting), so changing FOLDER_STRUCTURE doesn't cause re-downloads.
     # Never look in other bundles' folders: many bundles use the same file
     # names (e.g. All_75mm.zip). Older versions named the folder of newer
     # bundles after the first part of the link (e.g. "Fantasy"), so All Bundle

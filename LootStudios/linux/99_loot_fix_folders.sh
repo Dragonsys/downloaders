@@ -30,6 +30,11 @@ LIST_FILE="loot_all_bundles.tsv"   # exported list (next to this script, or a fu
 # Where the bundles are stored (same as LOOT_DIR in 3_loot_download_all_bundles.sh).
 # Empty = the folder this script is in.
 LOOT_DIR=""
+# Folder structure - the same as FOLDER_STRUCTURE in 3_loot_download_all_bundles.sh. Available options:
+#   "BUNDLE_FOLDER" -> FaewoodHaven/...    (default; bundle name from the download link)
+#   "BUNDLE_TITLE"  -> Faewood Haven/...   (bundle title as shown on the site)
+# Files are moved to the bundle folder this gives, so switching it here moves your bundles over.
+FOLDER_STRUCTURE="BUNDLE_FOLDER"
 DRY_RUN=1             # 1 = only show what would be moved, change nothing; 0 = move
 # ==============================
 
@@ -37,6 +42,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ "$LIST_FILE" != /* && ! -f "$LIST_FILE" && -f "$script_dir/$LIST_FILE" ]] && LIST_FILE="$script_dir/$LIST_FILE"
 [[ -z "$LOOT_DIR" ]] && LOOT_DIR="$script_dir"
 LOOT_DIR="${LOOT_DIR%/}"
+FOLDER_STRUCTURE="${FOLDER_STRUCTURE^^}"
+case "$FOLDER_STRUCTURE" in
+    BUNDLE_FOLDER|BUNDLE_TITLE) ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"$FOLDER_STRUCTURE\" - use BUNDLE_FOLDER or BUNDLE_TITLE.${NC}"; exit 1 ;;
+esac
 LEDGER="$LOOT_DIR/.loot_downloaded.tsv"
 
 echo -e "${BLUE}Loot Studios - fix bundle folders${NC}"
@@ -95,8 +105,8 @@ for (( n = 1; n < ${#lines[@]}; n++ )); do
     bundle="${f[${col[bundle]:-99}]}"; folder="${f[${col[folder]:-99}]}"
     scale="${f[${col[scale]:-99}]}"; material="${f[${col[material]:-99}]}"
     page="${f[${col[page]:-99}]}"; group="${f[${col[group]:-99}]}"
-    # Where 3_loot_download_all_bundles.sh puts it (same rules, ORGANIZE="folder")
-    if [[ -n "$folder" ]]; then dir="$(safe_name "$folder")"; else dir="$(safe_name "$bundle")"; fi
+    # Where 3_loot_download_all_bundles.sh puts it (same rules)
+    if [[ "$FOLDER_STRUCTURE" == "BUNDLE_TITLE" || -z "$folder" ]]; then dir="$(safe_name "$bundle")"; else dir="$(safe_name "$folder")"; fi
     [[ -z "$dir" ]] && dir="Unknown bundle"
     inner="$(safe_name "$file")"
     if [[ "$kind" == "item" ]]; then sub="$(safe_name "$group")"; inner="${sub:-Figures}/$inner"; fi
