@@ -1,6 +1,7 @@
 # MyMiniFactory - Step 6: Move downloads to the models folder
 # Moves each downloaded file to  <MODELS_PATH>\model_<id>\<filename>
-# (flat, no subfolders), which is the layout the checker script expects.
+# (flat, no subfolders), which is the layout the checker script expects - or into the model's folder
+# if it already has one ("<id>_<name>", also inside a designer folder: 99_mmf_rename_folders_from_json.ps1).
 #
 # The model ID is taken from, in order:
 #   1. "archive_id=<number>" anywhere in the path, looked up in the JSON metadata
@@ -17,7 +18,7 @@
 # Where your browser's download manager saves MyMiniFactory files
 # (empty = Downloads\www.myminifactory.com\download in your user folder).
 $DOWN_PATH = ''
-# model_<id> folders (empty = the "models" folder next to this script).
+# The model folders (empty = the "models" folder next to this script).
 $MODELS_PATH = ''
 # JSON metadata from step 2 (empty = the "downloads" folder next to this script).
 $JSON_PATH = ''
@@ -49,6 +50,39 @@ function Get-ArchiveIndex([string]$jsonDir) {
     return $index
 }
 
+# Model folders in $root: "model_<id>" or "<id>_<name>" (renamed by 99_mmf_rename_folders_from_json.ps1),
+# directly in it or one level down in a designer folder. Returns id -> list of folder paths (only ids in $ids).
+function Get-ModelFolderIndex([string]$root, [hashtable]$ids) {
+    $index = @{}
+    $add = { param($id, $path) if (-not $index.ContainsKey($id)) { $index[$id] = New-Object System.Collections.Generic.List[string] }; $index[$id].Add($path) }
+    foreach ($d in Get-ChildItem -LiteralPath $root -Directory -Force) {
+        if ($d.Name -match '^model_(\d+)$' -or $d.Name -match '^(\d+)_') {
+            if ($ids.ContainsKey($Matches[1])) { & $add $Matches[1] $d.FullName; continue }
+        }
+        # Not a model folder: a designer folder
+        foreach ($s in Get-ChildItem -LiteralPath $d.FullName -Directory -Force -ErrorAction SilentlyContinue) {
+            if ($s.Name -match '^model_(\d+)$' -or $s.Name -match '^(\d+)_') {
+                if ($ids.ContainsKey($Matches[1])) { & $add $Matches[1] $s.FullName }
+            }
+        }
+    }
+    return $index
+}
+
+# The model's folder: model_<id>, else its only "<id>_<name>" folder (if there are several, the only
+# one that isn't empty); none (or no way to tell) = a new model_<id> folder
+function Get-ModelDir([string]$modelId) {
+    $new = Join-Path $MODELS_PATH "model_$modelId"
+    if (-not $folderIndex.ContainsKey($modelId)) { return $new }
+    $found = @($folderIndex[$modelId])
+    $plain = @($found | Where-Object { (Split-Path -Leaf $_) -eq "model_$modelId" })
+    if ($plain.Count -ge 1) { return $plain[0] }
+    if ($found.Count -eq 1) { return $found[0] }
+    $nonEmpty = @($found | Where-Object { @(Get-ChildItem -LiteralPath $_ -Force).Count -gt 0 })
+    if ($nonEmpty.Count -eq 1) { return $nonEmpty[0] }
+    return $new
+}
+
 Clear-Host
 Write-Host "MyMiniFactory - Move Downloads" -ForegroundColor Cyan
 Write-Host "==============================" -ForegroundColor Cyan
@@ -61,6 +95,10 @@ foreach ($p in @($DOWN_PATH, $MODELS_PATH, $JSON_PATH)) {
 
 $root  = (Resolve-Path -LiteralPath $DOWN_PATH).ProviderPath.TrimEnd('\', '/')
 $index = Get-ArchiveIndex $JSON_PATH
+$ids = @{}
+foreach ($jf in Get-ChildItem -LiteralPath $JSON_PATH -Filter 'model_*.json' -File) { $ids[($jf.BaseName -replace '^model_', '')] = $true }
+$MODELS_PATH = (Resolve-Path -LiteralPath $MODELS_PATH).ProviderPath.TrimEnd('\', '/')
+$folderIndex = Get-ModelFolderIndex $MODELS_PATH $ids
 
 $moved = 0; $exists = 0; $noId = 0; $notRenamed = 0; $partial = 0; $failed = 0
 $problems = New-Object System.Collections.Generic.List[string]
@@ -101,7 +139,8 @@ foreach ($file in $files) {
         $notRenamed++; $problems.Add("NOT RENAMED $rel"); continue
     }
 
-    $destDir  = Join-Path $MODELS_PATH "model_$modelId"
+    $destDir  = Get-ModelDir $modelId
+    $destRel  = $destDir.Substring($MODELS_PATH.Length + 1)
     $destFile = Join-Path $destDir $file.Name
 
     if (Test-Path -LiteralPath $destFile) {
@@ -112,7 +151,7 @@ foreach ($file in $files) {
     }
 
     if ($DRY_RUN) {
-        Write-Host "Would move: $rel -> model_$modelId\$($file.Name)" -ForegroundColor Cyan
+        Write-Host "Would move: $rel -> $destRel\$($file.Name)" -ForegroundColor Cyan
         $moved++; continue
     }
 
@@ -122,7 +161,7 @@ foreach ($file in $files) {
         }
         # .NET move: literal paths, works across drives
         [System.IO.File]::Move($file.FullName, $destFile)
-        Write-Host "Moved: $rel -> model_$modelId\$($file.Name)" -ForegroundColor Green
+        Write-Host "Moved: $rel -> $destRel\$($file.Name)" -ForegroundColor Green
         $moved++
     } catch {
         Write-Host "Failed to move $rel : $($_.Exception.Message)" -ForegroundColor Red

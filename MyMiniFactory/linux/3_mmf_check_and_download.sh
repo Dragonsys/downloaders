@@ -66,6 +66,15 @@ IMAGES_ONLY=0           # 1 = only download images: no file check, and missing_d
                         #     Looks for each model's folder in DOWNLOAD_DIR and in models/ next to this script.
 IMAGES_CREATE_FOLDERS=0 # with IMAGES_ONLY=1: 1 = models without a folder get a new "<id>_<name>" folder
                         #     in DOWNLOAD_DIR for their images; 0 = skip them
+# Folder structure for those new folders - use the same as in 99_mmf_rename_folders_from_json.ps1.
+# Available options:
+#   "DESIGNER/ID_NAME"  -> MatMire_Makes/849932_Caterpillar   (default)
+#   "ID_NAME"           -> 849932_Caterpillar                 (directly in DOWNLOAD_DIR)
+# (The rename script's NAME options aren't offered here: without the ID no script finds the folder.)
+# Existing model folders are found in either structure.
+FOLDER_STRUCTURE="DESIGNER/ID_NAME"
+AUTHOR_NAME="name"      # designer folder name: "name" (display name) or "username" - as in the rename script
+UNKNOWN_AUTHOR="_Unknown_designer"   # for models whose metadata names no designer
 IMAGE_SIZE="large"      # "large" (1000x1000, ~150 KB), "standard" (720x720, ~80 KB)
                         # or "original" (full size, often 1 MB or more - for a big library that adds up)
 IMAGE_DELAY_SECONDS=3   # pause before every image request, like 2_mmf_download_metadata.sh.
@@ -86,6 +95,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$JSON_DIR" ]] && JSON_DIR="$script_dir/downloads"
 [[ -z "$DOWNLOAD_DIR" ]] && DOWNLOAD_DIR="$script_dir/models"
 DEFAULT_MODELS_DIR="$script_dir/models"
+case "${FOLDER_STRUCTURE^^}" in
+    DESIGNER/ID_NAME|DESIGNER\ID_NAME) by_designer=1 ;;
+    ID_NAME) by_designer=0 ;;
+    *) echo -e "${RED}Unknown FOLDER_STRUCTURE \"${FOLDER_STRUCTURE}\" - use \"DESIGNER/ID_NAME\" or \"ID_NAME\".${NC}"; exit 1 ;;
+esac
 # Relative paths are relative to this script's folder (e.g. "../.Sort/mmf_library")
 [[ "$JSON_DIR" != /* ]] && JSON_DIR="$script_dir/$JSON_DIR"
 [[ "$DOWNLOAD_DIR" != /* ]] && DOWNLOAD_DIR="$script_dir/$DOWNLOAD_DIR"
@@ -323,15 +337,42 @@ fetch_image() {
     done
 }
 
-# find_model_dir BASE ID - print the model's folder in BASE: "model_<id>", or the one "<id>_<name>"
-# folder (if there are several, the only one that isn't empty). 0 = found, 1 = none, 2 = several.
+# index_models BASE - remember where the model folders in BASE are: "model_<id>" or "<id>_<name>",
+# directly in BASE or one level down in a designer folder (99_mmf_rename_folders_from_json.ps1).
+# Read once per run (one folder listing per designer instead of one per model). Only ids with
+# a JSON file count; any other folder is taken as a designer folder.
+declare -A MODEL_DIRS=() TOP_DIRS=()
+index_models() {
+    local base="$1" d s n id
+    [[ -d "$base" ]] || return 0
+    for d in "$base"/*/; do
+        d="${d%/}"; n="${d##*/}"; id=""
+        [[ -d "$d" ]] || continue
+        [[ "$base" == "$DOWNLOAD_DIR" ]] && TOP_DIRS["${n,,}"]="$n"
+        if [[ "$n" =~ ^model_([0-9]+)$ || "$n" =~ ^([0-9]+)_ ]] && [[ -n "${have_json[${BASH_REMATCH[1]}]}" ]]; then
+            id="${BASH_REMATCH[1]}"; MODEL_DIRS["$base|$id"]+="$d"$'\x1f'; continue
+        fi
+        for s in "$d"/*/; do
+            s="${s%/}"; n="${s##*/}"
+            [[ -d "$s" ]] || continue
+            if [[ "$n" =~ ^model_([0-9]+)$ || "$n" =~ ^([0-9]+)_ ]] && [[ -n "${have_json[${BASH_REMATCH[1]}]}" ]]; then
+                MODEL_DIRS["$base|${BASH_REMATCH[1]}"]+="$s"$'\x1f'
+            fi
+        done
+    done
+}
+
+# find_model_dir BASE ID - print the model's folder in BASE (see index_models): "model_<id>", or the
+# one "<id>_<name>" folder (if there are several, the only one that isn't empty).
+# 0 = found, 1 = none, 2 = several.
 find_model_dir() {
-    local base="$1" id="$2" d nonempty=()
-    [[ -d "$base/model_$id" ]] && { printf '%s' "$base/model_$id"; return 0; }
-    local cands=("$base/${id}"_*/)
-    (( ${#cands[@]} == 0 )) && return 1
-    (( ${#cands[@]} == 1 )) && { printf '%s' "${cands[0]%/}"; return 0; }
-    for d in "${cands[@]}"; do [[ -n "$(ls -A "$d" 2>/dev/null)" ]] && nonempty+=("${d%/}"); done
+    local base="$1" id="$2" d nonempty=() cands=()
+    local list="${MODEL_DIRS["$base|$id"]}"
+    [[ -z "$list" ]] && return 1
+    IFS=$'\x1f' read -r -a cands <<< "${list%$'\x1f'}"
+    for d in "${cands[@]}"; do [[ "${d##*/}" == "model_$id" ]] && { printf '%s' "$d"; return 0; }; done
+    (( ${#cands[@]} == 1 )) && { printf '%s' "${cands[0]}"; return 0; }
+    for d in "${cands[@]}"; do [[ -n "$(ls -A "$d" 2>/dev/null)" ]] && nonempty+=("$d"); done
     (( ${#nonempty[@]} == 1 )) && { printf '%s' "${nonempty[0]}"; return 0; }
     return 2
 }
@@ -357,8 +398,9 @@ fi
 # do_images JSON MODEL_DIR MODEL_ID - download the model's images that aren't there yet
 do_images() {
     local json="$1" dir="$2/Images" id="$3" u name n=0 new=0 have=0 absent=0 failed=0 skipped=0 listed=0 r
-    local model_existed=0 images_existed=0
+    local model_existed=0 images_existed=0 parent_existed=0
     [[ -d "$2" ]] && model_existed=1
+    [[ -d "${2%/*}" ]] && parent_existed=1   # the designer folder, if a new one
     [[ -d "$dir" ]] && images_existed=1
     local -A used=()
     mapfile -t img_urls < <(jq -r --arg s "$IMAGE_SIZE" \
@@ -405,6 +447,7 @@ do_images() {
     if (( new == 0 )); then
         (( images_existed )) || rmdir "$dir" 2>/dev/null
         (( model_existed )) || rmdir "$2" 2>/dev/null
+        (( parent_existed )) || rmdir "${2%/*}" 2>/dev/null
     fi
     printf "  ${BLUE}Images:${NC} %s new, %s already there (%s of %s)" "$new" "$have" "$((new + have))" "${#img_urls[@]}"
     (( absent ))  && printf ", ${YELLOW}%s not on the server${NC}" "$absent"
@@ -413,6 +456,12 @@ do_images() {
     (( skipped )) && printf ", ${YELLOW}%s skipped - image downloads stopped: %s${NC}" "$skipped" "$images_stopped"
     printf "\n"
 }
+
+# Where the model folders are (also inside designer folders) - read once
+declare -A have_json=()
+for f in "${json_files[@]}"; do f="${f##*/}"; f="${f%.json}"; have_json["${f#model_}"]=1; done
+index_models "$DOWNLOAD_DIR"
+[[ $IMAGES_ONLY -eq 1 && "$DEFAULT_MODELS_DIR" != "$DOWNLOAD_DIR" ]] && index_models "$DEFAULT_MODELS_DIR"
 
 # HTML table start
 echo "<table>" >> "$HTML_TEMP"
@@ -461,13 +510,25 @@ for json_file in "${json_files[@]}"; do
         find_model_dir "$DOWNLOAD_DIR" "$model_id" >/dev/null; [[ $? -eq 2 ]] && several=1 || several=0
         has_images=$(jq -r '(.images // []) | length' "$json_file" 2>/dev/null)
         if (( IMAGES_CREATE_FOLDERS && ! several && ${has_images:-0} > 0 )); then
-            # New "<id>_<name>" folder (the name as the rename script makes it), just for the images
+            # New "<id>_<name>" folder (the name as the rename script makes it), just for the images,
+            # in the designer's folder with FOLDER_STRUCTURE="DESIGNER/ID_NAME"
             cname="$(clean_name "$model_name")"
             model_dir="${DOWNLOAD_DIR}/${model_id}${cname:+_$cname}"
+            if [[ "$by_designer" == 1 ]]; then
+                if [[ "$AUTHOR_NAME" == "username" ]]; then author=$(jq -r '.designer.username // .designer.name // ""' "$json_file" 2>/dev/null)
+                else author=$(jq -r '.designer.name // .designer.username // ""' "$json_file" 2>/dev/null); fi
+                author="$(clean_name "$author")"
+                [[ -z "$author" ]] && author="$UNKNOWN_AUTHOR"
+                [[ "${author^^}" =~ ^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$ ]] && author+="_"
+                # a designer folder already there with other upper/lower case is used as it is
+                [[ -n "${TOP_DIRS[${author,,}]}" ]] && author="${TOP_DIRS[${author,,}]}"
+                TOP_DIRS["${author,,}"]="$author"
+                model_dir="${DOWNLOAD_DIR}/${author}/${model_id}${cname:+_$cname}"
+            fi
             do_images "$json_file" "$model_dir" "$model_id"
             # The folder only comes into being when its first image is saved
             if [[ -d "$model_dir" ]]; then
-                printf "  ${BLUE}New folder:${NC} %s\n" "${model_dir##*/}"
+                printf "  ${BLUE}New folder:${NC} %s\n" "${model_dir#"$DOWNLOAD_DIR"/}"
                 ((folders_created++))
             fi
         elif [[ "${has_images:-0}" == "0" ]]; then

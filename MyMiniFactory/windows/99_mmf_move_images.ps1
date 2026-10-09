@@ -4,7 +4,7 @@
 # in upper-case ".JPG" (MyMiniFactory's bot check refuses those to scripts). It lists them in
 # missing_images.txt for your browser's download manager, and in missing_images_map.tsv says
 # which model folder each one belongs in. After downloading them with the browser, this script
-# moves each one to  <MODELS_PATH>\<model folder>\Images\<name>  - the same place and name the
+# moves each one to  <MODELS_PATH>\[<designer>\]<model folder>\Images\<name>  - the same place and name the
 # Linux script uses for the other images (name without the "1000X1000-" size prefix).
 #
 # The downloaded images are recognised by their file name; for common names (e.g. "1.JPG") also by
@@ -51,6 +51,42 @@ function Test-Jpeg([string]$path) {
     } catch { return $false }
 }
 
+# Model folders in $root: "model_<id>" or "<id>_<name>" (renamed by 99_mmf_rename_folders_from_json.ps1),
+# directly in it or one level down in a designer folder. Returns id -> list of folder paths (only ids in $ids).
+function Get-ModelFolderIndex([string]$root, [hashtable]$ids) {
+    $index = @{}
+    $add = { param($id, $path) if (-not $index.ContainsKey($id)) { $index[$id] = New-Object System.Collections.Generic.List[string] }; $index[$id].Add($path) }
+    foreach ($d in Get-ChildItem -LiteralPath $root -Directory -Force) {
+        if ($d.Name -match '^model_(\d+)$' -or $d.Name -match '^(\d+)_') {
+            if ($ids.ContainsKey($Matches[1])) { & $add $Matches[1] $d.FullName; continue }
+        }
+        # Not a model folder: a designer folder
+        foreach ($s in Get-ChildItem -LiteralPath $d.FullName -Directory -Force -ErrorAction SilentlyContinue) {
+            if ($s.Name -match '^model_(\d+)$' -or $s.Name -match '^(\d+)_') {
+                if ($ids.ContainsKey($Matches[1])) { & $add $Matches[1] $s.FullName }
+            }
+        }
+    }
+    return $index
+}
+
+
+# The model's folder in $MODELS_PATH, found by its id (model_<id>, or the one "<id>_<name>" folder -
+# if there are several, the only one that isn't empty); else the folder named as in the map
+function Get-ModelDir([string]$modelId, [string]$mapName) {
+    $named = Join-Path $MODELS_PATH $mapName
+    if (-not $folderIndex.ContainsKey($modelId)) { return $named }
+    $found = @($folderIndex[$modelId])
+    $plain = @($found | Where-Object { (Split-Path -Leaf $_) -eq "model_$modelId" })
+    if ($plain.Count -ge 1) { return $plain[0] }
+    if ($found.Count -eq 1) { return $found[0] }
+    $same = @($found | Where-Object { (Split-Path -Leaf $_) -eq $mapName })
+    if ($same.Count -eq 1) { return $same[0] }
+    $nonEmpty = @($found | Where-Object { @(Get-ChildItem -LiteralPath $_ -Force).Count -gt 0 })
+    if ($nonEmpty.Count -eq 1) { return $nonEmpty[0] }
+    return $named
+}
+
 Clear-Host
 Write-Host "MyMiniFactory - Move Browser-Downloaded Images" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
@@ -82,6 +118,10 @@ foreach ($line in Get-Content -LiteralPath $MAP_FILE -Encoding UTF8) {
                                     Folder = $folderName; Target = $target })
 }
 Write-Host "Images in the map: $($entries.Count)" -ForegroundColor Gray
+$MODELS_PATH = (Resolve-Path -LiteralPath $MODELS_PATH).ProviderPath.TrimEnd('\', '/')
+$ids = @{}
+foreach ($e in $entries) { $ids[$e.ModelId] = $true }
+$folderIndex = Get-ModelFolderIndex $MODELS_PATH $ids
 
 # ---- Index the downloaded files by name (only names that occur in the map) ----
 $wanted = @{}
@@ -99,9 +139,10 @@ $problems = New-Object System.Collections.Generic.List[string]
 $used = @{}
 
 foreach ($e in $entries) {
-    $destDir  = Join-Path (Join-Path $MODELS_PATH $e.Folder) 'Images'
+    $modelDir = Get-ModelDir $e.ModelId $e.Folder
+    $destDir  = Join-Path $modelDir 'Images'
     $destFile = Join-Path $destDir $e.Target
-    $show     = "$($e.Folder)\Images\$($e.Target)"
+    $show     = "$($modelDir.Substring($MODELS_PATH.Length + 1))\Images\$($e.Target)"
 
     if (Test-Path -LiteralPath $destFile) { $already++; continue }
 

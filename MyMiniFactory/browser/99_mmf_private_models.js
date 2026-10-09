@@ -69,7 +69,11 @@
       const [dir, file] = [u.slice(0, u.lastIndexOf('/') + 1), u.slice(u.lastIndexOf('/') + 1).replace(/^\d+X\d+-/, '')];
       return { original: { url: dir + file }, large: { url: dir + '1000X1000-' + file }, standard: { url: dir + '720X720-' + file } };
     });
+    // The designer, if the library data has one (for the designer folders of 99_mmf_rename_folders_from_json.ps1;
+    // without it the model goes into "_Unknown_designer")
+    const who = [m.designer, m.creator, m.user, m.owner].find(x => x && typeof x === 'object' && (x.name || x.username));
     out[id] = { id: +id, name: m.name || 'UNKNOWN_NAME', url: m.url ? `https://www.myminifactory.com/object/3d-print-${m.url}` : null,
+      designer: who ? { name: who.name || '', username: who.username || '' } : undefined,
       source: 'library (object is private or no longer public)', images, files: { total_count: items.length, items } };
     console.log(`${id}: ${out[id].name} - ${items.map(x => x.filename).join(', ')}`);
   }

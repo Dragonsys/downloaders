@@ -16,7 +16,7 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 | 6 | `windows/6_mmf_move_downloads.ps1` | Windows |
 | 7 | `linux/3_mmf_check_and_download.sh` again (check) | Linux |
 | 99 | `windows/99_mmf_extract_all_zips.ps1` *(optional: extract the archives)* | Windows |
-| 99 | `windows/99_mmf_rename_folders_from_json.ps1` *(optional: rename the folders, always last)* | Windows |
+| 99 | `windows/99_mmf_rename_folders_from_json.ps1` *(optional: rename the folders and sort them by designer, always last)* | Windows |
 | 99 | `browser/99_mmf_private_models.js` *(optional: only for private models, see step 2)* | Browser Console |
 | 99 | `windows/99_mmf_move_images.ps1` *(optional: sorts the `.JPG` images you downloaded with the browser, see step 3)* | Windows |
 
@@ -152,10 +152,11 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 | `MAX_IMAGE_DOWNLOADS` | `0` (no limit) | Stop after this many pictures per run |
 | `IMAGES_ONLY` | `0` | `1` = only download pictures: files aren't checked, and `missing_downloads.txt` and the reports are left as they are |
 | `IMAGES_CREATE_FOLDERS` | `0` | With `IMAGES_ONLY=1`: `1` = a model without a folder gets a new `<id>_<name>` folder (named like `99_mmf_rename_folders_from_json.ps1` names them) for its pictures; `0` = skip it |
+| `FOLDER_STRUCTURE` | `"DESIGNER/ID_NAME"` | With `IMAGES_CREATE_FOLDERS=1`: where the new folder goes - `"DESIGNER/ID_NAME"` = in the designer's folder, `"ID_NAME"` = directly in `DOWNLOAD_DIR`. Use the same as in the rename script. `AUTHOR_NAME` / `UNKNOWN_AUTHOR` as in the rename script |
 
 The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Older metadata may still point to the old image server (`dl2.myminifactory.com/object-assets/...`, which blocks scripts); the script uses the current address of the same picture instead, so there's no need to download the metadata again. The script paces itself like step 2: the same pause before every picture request (`IMAGE_DELAY_SECONDS`, 3 seconds); pictures already on disk are checked locally, without asking MyMiniFactory. MyMiniFactory's bot check refuses pictures whose name ends in upper-case `.JPG` to scripts (every other picture works), so those are listed in `missing_images.txt` instead - load that into your browser's download manager like `missing_downloads.txt` (keeping the folder structure it creates from the links), then run `windows/99_mmf_move_images.ps1` from your MyMiniFactory folder: it uses `missing_images_map.tsv` to move each one into `<model folder>\Images\` with the same name the script gives the other pictures. Dry run first, then `$DRY_RUN = $false`. By default it looks in `%USERPROFILE%\Downloads\assets.myminifactory.com` (`$DOWN_PATH`) and moves into `models\` next to it (`$MODELS_PATH`); downloads that aren't real JPEG images, aren't there yet, or match several images are left alone and listed in `move_images_problems.txt`. If any other picture is refused, the script stops picture downloads for that run (more requests would only keep the block going); each model then says how many it skipped - run it again a few hours later. Private models get their pictures too (`99_mmf_private_models.js` includes them in `private_models.json`).
 
-**Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with `99_mmf_rename_folders_from_json.ps1`, `<id>_<name>`. If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
+**Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with `99_mmf_rename_folders_from_json.ps1`, `<id>_<name>` (also inside a designer folder). If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
 
 **Leaving models out:** some models always show up as missing even though you have them (or can't be downloaded at all, like ones locked for your account). List them in **`exclude_models.txt`** next to `model_ids.txt`, one per line - the model ID, its URL, or its `<id>_<name>` folder name all work; `#` starts a comment:
 
@@ -206,15 +207,35 @@ pwsh -ExecutionPolicy Bypass -File .\99_mmf_extract_all_zips.ps1
 
 Each archive is extracted into its own `<name>_extracted` folder next to it; already-extracted ones are skipped on later runs. With 7-Zip installed it also handles `.rar`/`.7z`. Failures are listed in `failed_archives.txt`. **Keep the archives** - step 3 looks for them.
 
-### Optional, ALWAYS LAST - Rename the folders (Windows)
+### Optional, ALWAYS LAST - Rename the folders and sort them by designer (Windows)
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\99_mmf_rename_folders_from_json.ps1
 ```
 
-Dry run first, then `$DRY_RUN = $false`. Renames `model_851789` to `851789_Yhal_The_Skygazer`. Every rename is logged in `rename_log.csv`.
+Dry run first, then `$DRY_RUN = $false`. It names each model folder after the model and puts it in a folder per **designer** (the creator named in the model's metadata):
 
-**After this, steps 6 and 8 no longer recognise the renamed folders** (they expect `model_<id>`), so only do it once your library is complete. Step 3 does find them (it also looks for a `<id>_<name>` folder).
+```
+models/
+├── MatMire_Makes/
+│   ├── 653004_Snail_&_Slug_with_Holiday_Extras,_Articulated_fidget_figure/
+│   │   ├── Images/
+│   │   └── ... the model's files, as before
+│   └── 849932_Caterpillar,_Articulated_fidget,_Multicolor_3MF,_Cute_Flexi/
+└── Zio/
+    └── 293270_Kyrhios,_The_Exalted_One_(80mm_Base)/
+```
+
+Inside a model folder nothing changes. Folders renamed earlier (`<id>_<name>` side by side) are moved into their designer's folder too, so you can run it on a library you've already renamed. Every move is logged in `rename_log.csv`.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `$FOLDER_STRUCTURE` | `"DESIGNER\ID_NAME"` | How the model folders are arranged - the options are listed in the script: `"DESIGNER\ID_NAME"` (`MatMire_Makes\849932_Caterpillar`), `"DESIGNER\NAME"` (`MatMire_Makes\Caterpillar`), `"ID_NAME"` (`849932_Caterpillar`, all side by side), `"NAME"` (`Caterpillar`). Change it and run again to re-sort. The `NAME` options leave out the ID, so the other scripts (and this one) can't find those folders again - use them only for a finished library |
+| `$AUTHOR_NAME` | `"name"` | Designer folder name: `"name"` = display name (`MatMire_Makes`), `"username"` = MyMiniFactory user name (`MatMireMakes`) |
+| `$UNKNOWN_AUTHOR` | `"_Unknown_designer"` | For models whose metadata names no designer (can happen for private models) |
+| `$FOLDERS_PATH` | empty (`models` next to the script) | The folder with your model folders, e.g. your sorted library |
+
+The other scripts find the models in designer folders as well: step 3 (file check and pictures - new picture-only folders from `IMAGES_CREATE_FOLDERS=1` follow its own `FOLDER_STRUCTURE`), step 6 (puts new files into the model's existing folder) and `99_mmf_move_images.ps1`. A model that has no folder yet still arrives as `model_<id>` (step 6) - run this script again afterwards to put it in place. A model with two folders (e.g. a picture-only `<id>_<name>` folder next to `model_<id>`) is left alone and listed: merge them by hand.
 
 ---
 
@@ -222,4 +243,4 @@ Dry run first, then `$DRY_RUN = $false`. Renames `model_851789` to `851789_Yhal_
 
 Repeat steps 1-7, with the **"not downloaded"** filter on in step 1 so only the new models are collected. Files already downloaded are skipped, so only the new models are fetched.
 
-If you have already renamed your folders (`99_mmf_rename_folders_from_json.ps1`), that's fine: step 3 finds the renamed `<id>_<name>` folders too. New models arrive in `model_<id>` folders (step 6); run `99_mmf_rename_folders_from_json.ps1` again afterwards to rename them.
+If you have already renamed your folders (`99_mmf_rename_folders_from_json.ps1`), that's fine: steps 3 and 6 find the renamed `<id>_<name>` folders, also inside designer folders. New models arrive in `model_<id>` folders (step 6); run `99_mmf_rename_folders_from_json.ps1` again afterwards to rename them and put them in their designer's folder.
