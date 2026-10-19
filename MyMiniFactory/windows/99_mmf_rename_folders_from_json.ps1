@@ -34,6 +34,14 @@ $AUTHOR_NAME = "name"
 # Folder for models whose metadata names no designer (e.g. private models from 99_mmf_private_models.js)
 $UNKNOWN_AUTHOR = "_Unknown_designer"
 
+# A model with two folders (e.g. a picture-only "<id>_<name>" folder made by
+# 3_mmf_check_and_download.sh next to the folder with the model files):
+# $true  = merge them: the files of the smaller one are moved into the bigger one (files that are in
+#          both and identical are dropped; nothing is overwritten - if a file with the same name but
+#          other contents is in both, that model is left alone and listed)
+# $false = leave such models alone and list them
+$MERGE_FOLDERS = $true
+
 # Maximum length of the name part (keeps paths under Windows limits)
 $MAX_NAME_LENGTH = 80
 
@@ -68,6 +76,31 @@ function Get-CleanName([string]$name, [int]$maxLen) {
         $clean = $clean.Substring(0, $maxLen).Trim('_', ' ', '.')
     }
     return $clean
+}
+
+# Two files with the same contents?
+function Test-SameFile([string]$a, [string]$b) {
+    if ((Get-Item -LiteralPath $a -Force).Length -ne (Get-Item -LiteralPath $b -Force).Length) { return $false }
+    return (Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $b -Algorithm SHA256).Hash
+}
+
+# What merging folder $from into $into would do: each file is moved (not in $into yet) or dropped
+# (an identical copy is there). Conflict = a file in both with other contents (then nothing is done).
+function Get-MergePlan([string]$from, [string]$into) {
+    $plan = New-Object System.Collections.Generic.List[object]
+    foreach ($f in Get-ChildItem -LiteralPath $from -Recurse -File -Force) {
+        $rel = $f.FullName.Substring($from.Length + 1)
+        $dst = Join-Path $into $rel
+        if (Test-Path -LiteralPath $dst) {
+            if (-not (Test-Path -LiteralPath $dst -PathType Leaf) -or -not (Test-SameFile $f.FullName $dst)) {
+                return [pscustomobject]@{ Plan = $plan; Conflict = $rel }
+            }
+            $plan.Add([pscustomobject]@{ Src = $f.FullName; Dst = $dst; Same = $true })
+        } else {
+            $plan.Add([pscustomobject]@{ Src = $f.FullName; Dst = $dst; Same = $false })
+        }
+    }
+    return [pscustomobject]@{ Plan = $plan; Conflict = $null }
 }
 
 # Model folders in $root: "model_<id>" or "<id>_<name>", directly in it or one level down in a
@@ -114,7 +147,7 @@ foreach ($d in Get-ChildItem -LiteralPath $FOLDERS_PATH -Directory -Force) { $to
 Write-Host "Found model folders for $($folderIndex.Count) of them" -ForegroundColor Green
 Write-Host ""
 
-$renamed = 0; $already = 0; $notFound = 0; $conflicts = 0; $several = 0; $noName = 0; $failed = 0; $current = 0
+$renamed = 0; $already = 0; $notFound = 0; $conflicts = 0; $several = 0; $merged = 0; $noName = 0; $failed = 0; $current = 0
 $log = New-Object System.Collections.Generic.List[object]
 $designers = @{}
 $leftDirs = @{}
@@ -130,13 +163,21 @@ foreach ($jsonFile in $jsonFiles) {
         continue
     }
     $found = @($folderIndex[$modelId])
+    $mergeFrom = @()
     if ($found.Count -gt 1) {
-        # e.g. an images-only "<id>_<name>" folder next to model_<id>: leave it to the user
-        Write-Host "$prefix - several folders, left alone: $(($found | ForEach-Object { $_.Substring($FOLDERS_PATH.Length + 1) }) -join ' | ')" -ForegroundColor Yellow
-        $several++
-        continue
+        # e.g. an images-only "<id>_<name>" folder next to the one with the model files
+        if (-not $MERGE_FOLDERS) {
+            Write-Host "$prefix - several folders, left alone: $(($found | ForEach-Object { $_.Substring($FOLDERS_PATH.Length + 1) }) -join ' | ')" -ForegroundColor Yellow
+            $several++
+            continue
+        }
+        # The folder with the most files stays (moving a whole folder is quick); the others are merged into it
+        $byCount = @($found | Sort-Object { @(Get-ChildItem -LiteralPath $_ -Recurse -File -Force).Count } -Descending)
+        $oldFolder = $byCount[0]
+        $mergeFrom = @($byCount | Select-Object -Skip 1)
+    } else {
+        $oldFolder = $found[0]
     }
-    $oldFolder = $found[0]
     $oldRel    = $oldFolder.Substring($FOLDERS_PATH.Length + 1)
 
     try {
@@ -190,12 +231,56 @@ foreach ($jsonFile in $jsonFiles) {
     }
     $newFolder = Join-Path $FOLDERS_PATH $newRel
 
+    # Several folders: merge the others into the main one first (all or nothing per model)
+    if ($mergeFrom.Count -gt 0) {
+        $plans = @(); $conflict = $null; $mergeFailed = $false
+        foreach ($m in $mergeFrom) {
+            $p = Get-MergePlan $m $oldFolder
+            if ($p.Conflict) { $conflict = "$($m.Substring($FOLDERS_PATH.Length + 1))\$($p.Conflict)"; break }
+            $plans += [pscustomobject]@{ From = $m; Plan = $p.Plan }
+        }
+        if ($conflict) {
+            Write-Host "$prefix - several folders, not merged: $conflict is also in $oldRel with other contents" -ForegroundColor Yellow
+            $several++
+            continue
+        }
+        foreach ($p in $plans) {
+            $fromRel = $p.From.Substring($FOLDERS_PATH.Length + 1)
+            $nMove = @($p.Plan | Where-Object { -not $_.Same }).Count
+            $nSame = $p.Plan.Count - $nMove
+            $what  = "$nMove file(s)" + $(if ($nSame) { ", $nSame identical file(s) dropped" } else { '' })
+            if ($DRY_RUN) { Write-Host "$prefix - would merge: $fromRel -> $oldRel ($what)" -ForegroundColor Cyan; continue }
+            try {
+                foreach ($x in $p.Plan) {
+                    if ($x.Same) { Remove-Item -LiteralPath $x.Src -Force -ErrorAction Stop; continue }
+                    [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $x.Dst))
+                    [System.IO.File]::Move($x.Src, $x.Dst)
+                }
+                # The merged folder is empty now (only empty subfolders left): remove it
+                if (@(Get-ChildItem -LiteralPath $p.From -Recurse -File -Force).Count -eq 0) {
+                    Remove-Item -LiteralPath $p.From -Recurse -Force -ErrorAction Stop
+                }
+                Write-Host "$prefix - merged: $fromRel -> $oldRel ($what)" -ForegroundColor Green
+                $log.Add([pscustomobject]@{ OldName = $fromRel; NewName = "(merged into) $oldRel"; Time = (Get-Date -Format s) })
+                $leftDirs[(Split-Path -Parent $p.From)] = $true
+            } catch {
+                Write-Host "$prefix - ERROR while merging $fromRel : $($_.Exception.Message)" -ForegroundColor Red
+                $failed++
+                $mergeFailed = $true; break
+            }
+        }
+        if ($mergeFailed) { continue }
+        $merged++
+    }
+
     if ($oldFolder -ceq $newFolder) { $already++; continue }
 
     # Same path apart from upper/lower case (e.g. the designer changed the case of their name):
     # Windows sees it as the same folder, so it's moved via a temporary name below
     $caseOnly = ($oldFolder -ieq $newFolder)
-    if (-not $caseOnly -and (Test-Path -LiteralPath $newFolder)) {
+    # (in a dry run a folder that would be merged away still holds the target's place)
+    $mergedAway = @($mergeFrom | Where-Object { $_ -ieq $newFolder }).Count -gt 0
+    if (-not $caseOnly -and -not ($DRY_RUN -and $mergedAway) -and (Test-Path -LiteralPath $newFolder)) {
         Write-Host "$prefix - target already exists: $newRel" -ForegroundColor Yellow
         $conflicts++
         continue
@@ -251,6 +336,7 @@ Write-Host ("{0,-26}{1}" -f $(if ($DRY_RUN) { "Would move/rename:" } else { "Mov
 Write-Host ("{0,-26}{1}" -f "Already in place:", $already) -ForegroundColor Gray
 if ($byDesigner) { Write-Host ("{0,-26}{1}" -f "Designers:", $designers.Count) -ForegroundColor Gray }
 Write-Host ("{0,-26}{1}" -f "No folder:", $notFound) -ForegroundColor Gray
+if ($merged) { Write-Host ("{0,-26}{1}" -f $(if ($DRY_RUN) { "Would merge folders:" } else { "Merged folders:" }), $merged) -ForegroundColor Green }
 Write-Host ("{0,-26}{1}" -f "Several folders:", $several) -ForegroundColor $(if ($several) { 'Yellow' } else { 'Gray' })
 Write-Host ("{0,-26}{1}" -f "Name conflicts:", $conflicts) -ForegroundColor $(if ($conflicts) { 'Yellow' } else { 'Gray' })
 Write-Host ("{0,-26}{1}" -f "No usable name:", $noName) -ForegroundColor $(if ($noName) { 'Yellow' } else { 'Gray' })

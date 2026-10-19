@@ -9,12 +9,12 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 | Step | File | Runs on |
 |---|---|---|
 | 1 | `browser/1_mmf_collect_model_ids.js` | Browser Console |
-| 2 | `linux/2_mmf_download_metadata.sh` | Linux |
-| 3 | `linux/3_mmf_check_and_download.sh` | Linux |
+| 2 | `linux/2_mmf_download_metadata.sh` | Git Bash on the PC whose browser your cookie came from (or Linux, if that's where your browser is) |
+| 3 | `linux/3_mmf_check_and_download.sh` | Same as step 2 (needs `jq`) |
 | 4 | *(your browser's download manager)* | Windows |
 | 5 | `windows/5_mmf_correct_filenames.ps1` | Windows |
 | 6 | `windows/6_mmf_move_downloads.ps1` | Windows |
-| 7 | `linux/3_mmf_check_and_download.sh` again (check) | Linux |
+| 7 | `linux/3_mmf_check_and_download.sh` again (check) | Same as step 2 (needs `jq`) |
 | 99 | `windows/99_mmf_extract_all_zips.ps1` *(optional: extract the archives)* | Windows |
 | 99 | `windows/99_mmf_rename_folders_from_json.ps1` *(optional: rename the folders and sort them by designer, always last)* | Windows |
 | 99 | `browser/99_mmf_private_models.js` *(optional: only for private models, see step 2)* | Browser Console |
@@ -24,22 +24,24 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
 
 ## One-time setup
 
-### On Linux
+### The bash scripts (steps 2, 3 and 7)
 
-1. Install the tools (Debian/Ubuntu):
+Run them on **the PC whose browser you copy the cookie from** - usually your Windows PC, in **Git Bash**. MyMiniFactory's Cloudflare bot check refuses the cookie when a script sends it from another machine: a cookie copied on your Windows PC and used on a Linux server gets `HTTP 403` + "Just a moment..." for every model, although the same cookie works on the PC it came from. Step 3 then runs on the same PC too, so everything except the browser stays in one place. (On Windows, step 3 can also download the `.JPG` pictures MyMiniFactory refuses to Linux - see `JPG_TO_BROWSER` in step 3.)
+
+1. Install the tools:
+   - **Windows:** [Git for Windows](https://git-scm.com/download/win) (gives you **Git Bash** and curl) and **jq**: `winget install jqlang.jq` - then open a new Git Bash window.
+   - **Linux** (Debian/Ubuntu): `sudo apt install curl jq`
+
+   **`jq` is required for step 3** (`3_mmf_check_and_download.sh` reads every model's JSON with it and stops with `jq not installed` without it). Step 2 only needs it for private models.
+
+2. Make your **MyMiniFactory folder** and put the two scripts from the `linux` folder in it (`2_mmf_download_metadata.sh`, `3_mmf_check_and_download.sh` - they're bash scripts and run in Git Bash as they are). The scripts keep everything in the folder they're in (`downloads/` for the JSON, `models/` for the files). A NAS share works; the Windows scripts use the same folder. In Git Bash a mapped drive `Z:` is `/z`, a share is `//nas/share/...`:
 
    ```bash
-   sudo apt install curl jq
+   mkdir -p /z/3DPrints/MyMiniFactory/models
+   cp 2_mmf_download_metadata.sh 3_mmf_check_and_download.sh /z/3DPrints/MyMiniFactory/
    ```
 
-2. Make your **MyMiniFactory folder** and put the two Linux scripts in it. The scripts keep everything in the folder they're in (`downloads/` for the JSON, `models/` for the files). These examples use `/mnt/nas/3DPrints/MyMiniFactory`; use your own folder:
-
-   ```bash
-   mkdir -p /mnt/nas/3DPrints/MyMiniFactory/models
-   cp 2_mmf_download_metadata.sh 3_mmf_check_and_download.sh /mnt/nas/3DPrints/MyMiniFactory/
-   ```
-
-   Pick a folder your Windows PC can see too (e.g. a NAS share mapped as `Z:`, so this is `Z:\3DPrints\MyMiniFactory`), since the Windows scripts work on the same files.
+   (On Linux, e.g. `/mnt/nas/3DPrints/MyMiniFactory`.)
 
 3. Create **`user_agent.txt`** in that folder: in the browser you use for MyMiniFactory, open the Console (F12), run `navigator.userAgent`, and paste the result into the file (quotes are fine).
 
@@ -50,17 +52,13 @@ MyMiniFactory blocks file downloads from scripts (Cloudflare bot check), so the 
    4. Right-click the value of **cookie** → **Copy value**.
    5. Paste it into `cookie.txt` and save.
 
-   Then protect it:
-
-   ```bash
-   chmod 600 /mnt/nas/3DPrints/MyMiniFactory/cookie.txt
-   ```
+   Keep it private (it's your login). On Linux: `chmod 600 cookie.txt`.
 
    The cookie expires eventually; when step 2 starts failing, repeat this. If the browser updates to a new version, refresh `user_agent.txt` too.
 
 ### On Windows
 
-1. Copy the `.ps1` files from the `windows` folder into the **same MyMiniFactory folder** as the Linux scripts (e.g. `Z:\3DPrints\MyMiniFactory`). They then find `downloads\` and `models\` by themselves.
+1. Copy the `.ps1` files from the `windows` folder into the **same MyMiniFactory folder** as the bash scripts (e.g. `Z:\3DPrints\MyMiniFactory`). They then find `downloads\` and `models\` by themselves.
 2. Install **PowerShell 7** (recommended; `winget install Microsoft.PowerShell`) and optionally **7-Zip** (needed for `.rar`/`.7z`, faster for everything).
 3. The folder settings at the top of each `.ps1` file are empty by default, which means:
    - `$DOWN_PATH` - where the download manager saves files: `%USERPROFILE%\Downloads\www.myminifactory.com\download`
@@ -97,19 +95,23 @@ Do this once (Chrome remembers it):
    The IDs are kept until you reload the page: if you change the filter, press **F5** before running the script again, or the IDs from before the change are included too.
 4. Open **Notepad**, paste, and save as **`model_ids.txt`** in your MyMiniFactory folder (e.g. `Z:\3DPrints\MyMiniFactory`, or copy it there afterwards) (Save as type: **All files**).
 
-### Step 2 - Download the metadata (Linux)
+### Step 2 - Download the metadata (Git Bash, same PC as your browser)
+
+Run this on the **PC whose browser you copied `cookie.txt` from** - from another machine MyMiniFactory's bot check refuses every request (see [One-time setup](#the-bash-scripts-steps-2-3-and-7)). In **Git Bash**, in your MyMiniFactory folder (a mapped drive `Z:` is `/z`, a NAS share `//nas/share/...`):
 
 ```bash
-cd /mnt/nas/3DPrints/MyMiniFactory
+cd /z/3DPrints/MyMiniFactory
 bash 2_mmf_download_metadata.sh
 ```
+
+(On Linux, if your browser is there: `cd /mnt/nas/3DPrints/MyMiniFactory` and the same command.)
 
 This saves one `downloads/model_<id>.json` per model (3 seconds apart). **Models whose metadata is already there are skipped** without asking MyMiniFactory, so after adding new purchases only the new models are fetched (a saved error page doesn't count - that model is tried again). To download everything again (e.g. to pick up files a creator added later), set `REFRESH_EXISTING=1`; if a refresh fails, the metadata you had is kept. Failed IDs go to `downloads/failed_ids.txt` with the server's reply in `error_<id>.txt`. To retry only those, copy `downloads/failed_ids.txt` over `model_ids.txt` and run it again.
 
 | Result | Meaning |
 |---|---|
 | `HTTP 401` | Cookie not accepted - save a fresh `cookie.txt` |
-| `HTTP 403` + "Just a moment" | Bot check - make sure `user_agent.txt` matches the browser the cookie came from |
+| `HTTP 403` + "Just a moment" | Bot check - run step 2 on the PC whose browser the cookie came from, with `user_agent.txt` from that same browser (a script on another machine is refused even with a valid cookie) |
 | `FAILED (HTTP 404 - private or removed model)` | Usually a model the creator has made **private** or taken off sale - see below |
 | `OK (private model - file list from private_models.json)` | Its file list came from `private_models.json` (see below) |
 | `HTTP 429` | Too many requests - raise `DELAY_SECONDS` |
@@ -126,14 +128,16 @@ Models the creator has made private (or taken off sale) stay in your library, bu
 
 Then continue with step 3 as usual. Some older private models have one archive without an archive number; your download manager saves it as just `<model id>` (no `archive_id=` folder) - step 5 handles that. If an ID isn't found by the snippet either, the model was really removed. IDs listed as **"No access (locked for your account)"** are still shown in your library, but MyMiniFactory doesn't let you download them any more (often free models the creator has made private) - downloading them in the browser fails too, so there's nothing to get.
 
-### Step 3 - Find what's missing (Linux)
+### Step 3 - Find what's missing (Git Bash, same PC as step 2)
+
+Needs `jq` (see [One-time setup](#the-bash-scripts-steps-2-3-and-7)).
 
 ```bash
-cd /mnt/nas/3DPrints/MyMiniFactory
+cd /z/3DPrints/MyMiniFactory
 bash 3_mmf_check_and_download.sh
 ```
 
-It checks every file listed in the JSON against `models/model_<id>/` and writes:
+It checks the models in **`model_ids.txt`** (the ones step 1 collected, e.g. your new purchases - `ONLY_MODEL_IDS=1`; set it to `0` to check every `model_<id>.json` in `downloads/`, i.e. your whole library). For each, it checks every file listed in its JSON against `models/model_<id>/` and writes:
 
 - **`missing_downloads.txt`** - download links of everything missing
 - **`report.html`** - open in a browser for a colour-coded overview
@@ -148,7 +152,7 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 | `IMAGES` | `1` | `0` = don't download pictures |
 | `IMAGE_SIZE` | `"large"` | `"large"` = 1000×1000 (~150 KB), `"standard"` = 720×720, `"original"` = full size (often 1 MB or more each - for thousands of models that's a lot of disk space) |
 | `IMAGE_DELAY_SECONDS` | `3` | Pause before every picture request, like step 2 |
-| `JPG_TO_BROWSER` | `1` | Pictures whose name ends in upper-case `.JPG` aren't requested (MyMiniFactory's bot check refuses those to scripts); they're listed in `missing_images.txt` for your browser's download manager, and `missing_images_map.tsv` says which model folder each belongs in |
+| `JPG_TO_BROWSER` | `1` | Pictures whose name ends in upper-case `.JPG` aren't requested (MyMiniFactory's bot check refuses those to scripts); they're listed in `missing_images.txt` for your browser's download manager, and `missing_images_map.tsv` says which model folder each belongs in. **In Git Bash on Windows set it to `0`:** MyMiniFactory refuses those pictures to Linux servers, but usually not to a Windows PC, so the script downloads them itself and the browser step and `99_mmf_move_images.ps1` aren't needed (if one is refused anyway, picture downloads stop for that run - set it back to `1`) |
 | `MAX_IMAGE_DOWNLOADS` | `0` (no limit) | Stop after this many pictures per run |
 | `IMAGES_ONLY` | `0` | `1` = only download pictures: files aren't checked, and `missing_downloads.txt` and the reports are left as they are |
 | `IMAGES_CREATE_FOLDERS` | `0` | With `IMAGES_ONLY=1`: `1` = a model without a folder gets a new `<id>_<name>` folder (named like `99_mmf_rename_folders_from_json.ps1` names them) for its pictures; `0` = skip it |
@@ -156,7 +160,7 @@ It checks every file listed in the JSON against `models/model_<id>/` and writes:
 
 The summary shows how many were downloaded; failures are listed in `failed_images.txt`. Older metadata may still point to the old image server (`dl2.myminifactory.com/object-assets/...`, which blocks scripts); the script uses the current address of the same picture instead, so there's no need to download the metadata again. The script paces itself like step 2: the same pause before every picture request (`IMAGE_DELAY_SECONDS`, 3 seconds); pictures already on disk are checked locally, without asking MyMiniFactory. MyMiniFactory's bot check refuses pictures whose name ends in upper-case `.JPG` to scripts (every other picture works), so those are listed in `missing_images.txt` instead - load that into your browser's download manager like `missing_downloads.txt` (keeping the folder structure it creates from the links), then run `windows/99_mmf_move_images.ps1` from your MyMiniFactory folder: it uses `missing_images_map.tsv` to move each one into `<model folder>\Images\` with the same name the script gives the other pictures. Dry run first, then `$DRY_RUN = $false`. By default it looks in `%USERPROFILE%\Downloads\assets.myminifactory.com` (`$DOWN_PATH`) and moves into `models\` next to it (`$MODELS_PATH`); downloads that aren't real JPEG images, aren't there yet, or match several images are left alone and listed in `move_images_problems.txt`. If any other picture is refused, the script stops picture downloads for that run (more requests would only keep the block going); each model then says how many it skipped - run it again a few hours later. Private models get their pictures too (`99_mmf_private_models.js` includes them in `private_models.json`).
 
-**Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1`, and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with `99_mmf_rename_folders_from_json.ps1`, `<id>_<name>` (also inside a designer folder). If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
+**Adding pictures to models you already have:** make sure `downloads/` has their `model_<id>.json` files (step 2, or put back ones you archived), set `IMAGES_ONLY=1` (and `ONLY_MODEL_IDS=0` for all of them, not just the ones in `model_ids.txt`), and run step 3. Pictures go into each model's folder - `model_<id>` or, if you've renamed it with `99_mmf_rename_folders_from_json.ps1`, `<id>_<name>` (also inside a designer folder). If your finished models live somewhere else (e.g. a sorted library folder), set `DOWNLOAD_DIR` to that folder for this run - a relative path like `"../.Sort/mmf_library"` is relative to the script's folder. Models still in `models/` next to the script are found there too. If a model has two `<id>_...` folders, the one with files is used. Models without a folder are skipped and listed, unless `IMAGES_CREATE_FOLDERS=1`. Set `IMAGES_ONLY`, `ONLY_MODEL_IDS`, `IMAGES_CREATE_FOLDERS` and `DOWNLOAD_DIR` back afterwards.
 
 **Leaving models out:** some models always show up as missing even though you have them (or can't be downloaded at all, like ones locked for your account). List them in **`exclude_models.txt`** next to `model_ids.txt`, one per line - the model ID, its URL, or its `<id>_<name>` folder name all work; `#` starts a comment:
 
@@ -193,7 +197,7 @@ pwsh -ExecutionPolicy Bypass -File .\6_mmf_move_downloads.ps1
 
 Again a **dry run** first; then set `$DRY_RUN = $false` and rerun. Files go to `models\model_<id>\<filename>` in your MyMiniFactory folder, the layout step 3 checks. Empty download folders are cleaned up. Anything needing attention is listed in `move_problems.txt` (files already in the models folder, not renamed yet, unknown model).
 
-### Step 7 - Check, and repeat (Linux)
+### Step 7 - Check, and repeat (Git Bash)
 
 Run step 3 again. Anything still missing is in the new `missing_downloads.txt` - repeat steps 4-6 for those.
 
@@ -235,7 +239,7 @@ Inside a model folder nothing changes. Folders renamed earlier (`<id>_<name>` si
 | `$UNKNOWN_AUTHOR` | `"_Unknown_designer"` | For models whose metadata names no designer (can happen for private models) |
 | `$FOLDERS_PATH` | empty (`models` next to the script) | The folder with your model folders, e.g. your sorted library |
 
-The other scripts find the models in designer folders as well: step 3 (file check and pictures - new picture-only folders from `IMAGES_CREATE_FOLDERS=1` follow its own `FOLDER_STRUCTURE`), step 6 (puts new files into the model's existing folder) and `99_mmf_move_images.ps1`. A model that has no folder yet still arrives as `model_<id>` (step 6) - run this script again afterwards to put it in place. A model with two folders (e.g. a picture-only `<id>_<name>` folder next to `model_<id>`) is left alone and listed: merge them by hand.
+The other scripts find the models in designer folders as well: step 3 (file check and pictures - new picture-only folders from `IMAGES_CREATE_FOLDERS=1` follow its own `FOLDER_STRUCTURE`), step 6 (puts new files into the model's existing folder) and `99_mmf_move_images.ps1`. A model that has no folder yet still arrives as `model_<id>` (step 6) - run this script again afterwards to put it in place. A model with two folders (e.g. a picture-only `<id>_<name>` folder from step 3 next to the folder with the model files) is merged (`$MERGE_FOLDERS`, on by default): the smaller folder's files move into the bigger one, identical copies are dropped, nothing is overwritten - if both have a file with the same name but different contents, that model is left alone and listed.
 
 ---
 

@@ -1,6 +1,6 @@
 # 3D Print Download Toolkit
 
-Scripts for backing up the 3D-print files you've **purchased or subscribed to** from **MyMiniFactory**, **Loot Studios**, **Heroes Infinite**, **Patreon**, **MakerWorld** and **Cults3D** to your own storage - a local disk or a NAS.
+Scripts for backing up the 3D-print files you've **purchased or subscribed to** from **MyMiniFactory**, **Loot Studios**, **Heroes Infinite**, **Patreon**, **MakerWorld**, **Cults3D** and **Props & Beyond** to your own storage - a local disk or a NAS.
 
 Each site has its own folder with a step-by-step guide:
 
@@ -10,13 +10,14 @@ Each site has its own folder with a step-by-step guide:
 - **[Patreon/README.md](Patreon/README.md)** - collecting and downloading the files attached to the posts of every creator you support (several accounts)
 - **[MakerWorld/README.md](MakerWorld/README.md)** - your collections, download history and liked models: model files, print profiles, pictures and descriptions
 - **[Cults3D/README.md](Cults3D/README.md)** - your purchases: downloaded by your browser, then sorted by a Windows script into creator/model folders with pictures and descriptions
+- **[PropsAndBeyond/README.md](PropsAndBeyond/README.md)** - your library (monthly Prop Drops, Welcome Pack, single props): collected in the browser, downloaded, extracted and sorted into pack/prop folders with pictures by a Linux script
 
 ## What runs where
 
 | Folder | Runs on | How |
 |---|---|---|
 | `*/browser/*.js` | Your browser (Chrome/Edge), logged in to the site | Paste into the Console (F12) |
-| `*/linux/*.sh` | Linux (bash, curl; plus jq for MyMiniFactory, unzip for testing archives) | `bash scriptname.sh` |
+| `*/linux/*.sh` | Linux, or Git Bash on Windows (bash, curl; plus jq for MyMiniFactory, unzip for testing archives). MyMiniFactory's step 2 must run on the PC whose browser your cookie came from (usually Windows, in Git Bash); run its step 3 there too | `bash scriptname.sh` |
 | `MyMiniFactory/windows/*.ps1`, `Cults3D/windows/*.ps1` | Windows PowerShell (PowerShell 7 recommended) | `pwsh -ExecutionPolicy Bypass -File .\scriptname.ps1` |
 
 ## Script names
@@ -39,12 +40,13 @@ Make one folder per site and **copy that site's scripts into it**. The scripts s
 ├── HeroesInfinite/        3_hi_download.sh, its lists, and the collection folders
 ├── Patreon/               3_patreon_download.sh, its lists (one per account), and the creator folders
 ├── MakerWorld/            .mw_downloaded.tsv and the collection folders (filled by the browser script)
-└── Cults3D/               2_cults_sort_downloads.ps1, .cults_downloaded.tsv and the creator folders
+├── Cults3D/               2_cults_sort_downloads.ps1, .cults_downloaded.tsv and the creator folders
+└── PropsAndBeyond/        2_pb_download.sh, pb_list.tsv, .pb_downloaded.tsv and the pack folders
 ```
 
 The folder names and location are up to you. The examples in the guides use `/mnt/nas/3DPrints/<site>` - replace that with your own folder.
 
-If Linux and Windows both use the scripts (MyMiniFactory), use a folder both can see, for example a NAS share mounted on Linux and mapped as a drive on Windows, and run the scripts from there.
+If Linux and Windows both use the scripts, use a folder both can see, for example a NAS share mounted on Linux and mapped as a drive on Windows, and run the scripts from there.
 
 **Want the files somewhere else?** Each script has its folders as plain settings at the top (`LOOT_DIR`, `HI_DIR`, `JSON_DIR`, `DOWNLOAD_DIR`, `$MODELS_PATH`, ...). They're empty by default, which means "the script's own folder"; put a full path in to use another folder. If you change a MyMiniFactory folder, change it in every MyMiniFactory script, since they work on the same folders.
 

@@ -31,6 +31,10 @@ HTML_TEMP="report.tmp"
 TEMP_FILE="all_filenames_by_model.tmp"
 EXCLUDE_FILE="exclude_models.txt"            # models to leave out: one ID per line ("# ..." = comment),
                                              # in the current folder or next to this script
+ONLY_MODEL_IDS=1                             # 1 = only the models listed in model_ids.txt (the ones step 1
+                                             #     collected - e.g. your new purchases); 0 = every model_<id>.json
+                                             #     in JSON_DIR (e.g. to check or add pictures to your whole library)
+MODEL_IDS_FILE="model_ids.txt"               # in the current folder or next to this script (as for step 2)
 
 # ------------------------------
 # DOWNLOAD SETTINGS
@@ -86,6 +90,8 @@ JPG_TO_BROWSER=1        # 1 = images whose name ends in upper-case ".JPG" are no
                         #     bot check refuses those to scripts (every other image works). They're listed
                         #     in missing_images.txt for your browser's download manager instead, with
                         #     missing_images_map.tsv saying which model folder each one belongs in.
+                        # 0 = request them like the others. Use 0 in Git Bash on Windows: the refusals
+                        #     hit Linux servers; a Windows PC usually gets these pictures.
 MISSING_IMAGES_FILE="missing_images.txt"
 MISSING_IMAGES_MAP="missing_images_map.tsv"
 IMAGES_FAILED_FILE="failed_images.txt"
@@ -132,12 +138,16 @@ printf "Missing URLs saved to: ${YELLOW}%s${NC}\n" "$OUTPUT_FILE"
 if [[ $GENERATE_ALLFILES -eq 1 ]]; then printf "Filename list saved to: ${YELLOW}%s${NC}\n" "$ALL_FILES_OUTPUT"; fi
 if [[ $GENERATE_HTML -eq 1 ]]; then printf "HTML report saved to:   ${YELLOW}%s${NC}\n" "$HTML_OUTPUT"; fi
 
+# Check tools
+command -v jq &> /dev/null || { echo -e "${RED}Error: jq not installed - this script needs it to read the JSON files.${NC}"; echo "Install it: Debian/Ubuntu: sudo apt install jq | Windows (Git Bash): winget install jqlang.jq, then open a new Git Bash window"; exit 1; }
+# jq.exe on Windows (Git Bash) ends its output lines with CRLF; the "\r" would end up in links
+# (curl: "malformed address") and names. -b (--binary) makes it write plain LF, as on Linux.
+# (Git Bash's $(...) drops a "\r" before the newline itself, so it's made visible with tr first.)
+[[ "$(command jq -n '"x"' 2>/dev/null | tr '\r' '#')" == *'#' ]] && jq() { command jq -b "$@"; }
 # Validate directories
 [[ ! -d "$JSON_DIR" ]] && { echo -e "${RED}JSON directory missing: $JSON_DIR${NC}"; exit 1; }
 [[ ! -d "$DOWNLOAD_DIR" ]] && { echo -e "${RED}Download directory missing: $DOWNLOAD_DIR${NC}"; exit 1; }
 
-# Check tools
-command -v jq &> /dev/null || { echo -e "${RED}Error: jq not installed.${NC}"; exit 1; }
 
 [[ $IMAGES_ONLY -eq 1 ]] && { IMAGES=1; DOWNLOAD_MISSING=0; }
 
@@ -170,6 +180,29 @@ echo ""
 shopt -s nullglob
 json_files=("$JSON_DIR"/model_*.json)
 (( ${#json_files[@]} == 0 )) && { echo -e "${RED}No model_*.json files found.${NC}"; exit 1; }
+all_json_files=("${json_files[@]}")
+
+# Only the models in model_ids.txt (ONLY_MODEL_IDS=1)
+if (( ONLY_MODEL_IDS )); then
+    ids_file="$MODEL_IDS_FILE"
+    [[ ! -f "$ids_file" && -f "$script_dir/$ids_file" ]] && ids_file="$script_dir/$ids_file"
+    if [[ -f "$ids_file" ]]; then
+        declare -A listed=()
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line//$'\r'/}"; line="${line#$'\xEF\xBB\xBF'}"; line="${line//[[:space:]]/}"
+            [[ "$line" =~ ^[0-9]+$ ]] && listed[$line]=1
+        done < "$ids_file"
+        kept=(); no_json=0
+        for f in "${json_files[@]}"; do id="${f##*/}"; id="${id%.json}"; id="${id#model_}"; [[ -n "${listed[$id]}" ]] && kept+=("$f"); done
+        for id in "${!listed[@]}"; do [[ -f "$JSON_DIR/model_$id.json" || -n "${excluded[$id]}" ]] || no_json=$((no_json + 1)); done
+        echo -e "Models:                ${YELLOW}${#kept[@]}${NC} listed in $MODEL_IDS_FILE (of ${#json_files[@]} with metadata; ONLY_MODEL_IDS=0 checks them all)"
+        (( no_json )) && echo -e "                       ${YELLOW}$no_json ID(s) in $MODEL_IDS_FILE have no metadata yet - run 2_mmf_download_metadata.sh first${NC}"
+        json_files=("${kept[@]}")
+        (( ${#json_files[@]} == 0 )) && { echo -e "${RED}None of the models in $MODEL_IDS_FILE has metadata in $JSON_DIR.${NC}"; exit 1; }
+    else
+        echo -e "Models:                all ${#json_files[@]} with metadata ($MODEL_IDS_FILE not found)"
+    fi
+fi
 
 if [[ $IMAGES_ONLY -eq 1 ]]; then
     IMAGES=1; DOWNLOAD_MISSING=0
@@ -459,7 +492,7 @@ do_images() {
 
 # Where the model folders are (also inside designer folders) - read once
 declare -A have_json=()
-for f in "${json_files[@]}"; do f="${f##*/}"; f="${f%.json}"; have_json["${f#model_}"]=1; done
+for f in "${all_json_files[@]}"; do f="${f##*/}"; f="${f%.json}"; have_json["${f#model_}"]=1; done
 index_models "$DOWNLOAD_DIR"
 [[ $IMAGES_ONLY -eq 1 && "$DEFAULT_MODELS_DIR" != "$DOWNLOAD_DIR" ]] && index_models "$DEFAULT_MODELS_DIR"
 

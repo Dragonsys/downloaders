@@ -37,6 +37,10 @@ EXCLUDE_FILE="exclude_models.txt"
 # ==============================
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# jq.exe on Windows (Git Bash) ends its output lines with CRLF; the "\r" would end up in links
+# (curl: "malformed address") and names. -b (--binary) makes it write plain LF, as on Linux.
+# (Git Bash's $(...) drops a "\r" before the newline itself, so it's made visible with tr first.)
+[[ "$(command jq -n '"x"' 2>/dev/null | tr '\r' '#')" == *'#' ]] && jq() { command jq -b "$@"; }
 [[ -z "$JSON_OUTPUT_DIR" ]] && JSON_OUTPUT_DIR="$script_dir/downloads"
 
 # Look for cookie and user agent: script setting, then environment variable, then file
@@ -137,6 +141,8 @@ ok=0
 fail=0
 from_library=0
 not_public=0
+bot_check=0
+bot_row=0
 existing=0
 requested=0
 
@@ -221,7 +227,17 @@ for id in "${ids[@]}"; do
         else
             rm -f "model_${id}.json.tmp"
         fi
+        # Cloudflare's bot check ("Just a moment..."): stop after a few in a row
+        if grep -q 'Just a moment' "error_${id}.txt" 2>/dev/null; then
+            bot_check=$((bot_check + 1)); bot_row=$((bot_row + 1))
+            if (( bot_row >= 3 )); then
+                echo -e "${RED}Stopped: MyMiniFactory's bot check refused 3 models in a row.${NC}"
+                break
+            fi
+            continue
+        fi
     fi
+    bot_row=0
 done
 
 echo ""
@@ -232,6 +248,12 @@ echo -e "${GREEN}Done. $ok downloaded, $existing already there, $fail failed.${N
 if (( fail > 0 )); then
     echo "Failed IDs are listed in '$JSON_OUTPUT_DIR/failed_ids.txt'."
     echo "Server responses for failures are saved as error_<id>.txt."
+fi
+if (( bot_check > 0 )); then
+    echo ""
+    echo -e "${YELLOW}MyMiniFactory's bot check (\"Just a moment...\") refused $bot_check request(s).${NC}"
+    echo "Run this script on the PC whose browser you copied cookie.txt from (on Windows: in Git Bash),"
+    echo "with user_agent.txt from that same browser - from another machine every request is refused."
 fi
 if (( not_public > 0 )); then
     echo ""

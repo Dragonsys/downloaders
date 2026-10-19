@@ -98,6 +98,10 @@ printf "Sources:     ${YELLOW}%s${NC}%s\n" "$SOURCES" "${COLLECTIONS:+ (collecti
 (( DOWNLOAD )) || printf "Mode:        ${YELLOW}check only${NC}\n"
 echo ""
 for t in curl jq; do command -v $t &>/dev/null || { echo -e "${RED}$t is not installed (sudo apt install curl jq unzip).${NC}"; exit 1; }; done
+# jq.exe on Windows (Git Bash) ends its output lines with CRLF; the "\r" would end up in links
+# (curl: "malformed address") and names. -b (--binary) makes it write plain LF, as on Linux.
+# (Git Bash's $(...) drops a "\r" before the newline itself, so it's made visible with tr first.)
+[[ "$(command jq -n '"x"' 2>/dev/null | tr '\r' '#')" == *'#' ]] && jq() { command jq -b "$@"; }
 (( EXTRACT )) && ! command -v unzip &>/dev/null && { echo -e "${RED}unzip is not installed (sudo apt install unzip), or set EXTRACT=0.${NC}"; exit 1; }
 mkdir -p "$MW_DIR" 2>/dev/null; [[ -w "$MW_DIR" ]] || { echo -e "${RED}No write permission for $MW_DIR${NC}"; exit 1; }
 

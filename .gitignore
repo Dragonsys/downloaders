@@ -23,6 +23,8 @@ mw_failed.txt
 mw_missing.txt
 cults_done.js
 cults_list*.json
+pb_failed.txt
+pb_skipped.txt
 move_problems.txt
 failed_archives.txt
 hi_failed_archives.txt
